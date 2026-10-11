@@ -4,6 +4,7 @@ import com.ticketing.client.rest.impl.PaymentGatewayChargeClientImpl;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.micrometer.tagged.TaggedCircuitBreakerMetrics;
 import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,7 +12,13 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Circuit breakers of the outbound calls (resilience4j).
+ * Circuit breakers of the outbound calls (resilience4j) and their Micrometer metrics.
+ *
+ * <p>{@link TaggedCircuitBreakerMetrics} is a {@code MeterBinder} bean, so Spring Boot binds it to every meter
+ * registry: each circuit breaker of the registry (including ones added later) publishes
+ * {@code resilience4j.circuitbreaker.state}, {@code .calls}, {@code .failure.rate}, {@code .slow.call.rate},
+ * {@code .buffered.calls} and {@code .not.permitted.calls}, tagged with {@code name} (e.g. {@value #PAYMENT_GATEWAY}).
+ * An open payment circuit is therefore visible in Prometheus / CloudWatch instead of only in the logs.
  */
 @Configuration(proxyBeanMethods = false)
 public class ResilienceConfig {
@@ -34,6 +41,17 @@ public class ResilienceConfig {
     @Bean
     public CircuitBreakerRegistry circuitBreakerRegistry() {
         return CircuitBreakerRegistry.ofDefaults();
+    }
+
+    /**
+     * Micrometer binding of every circuit breaker of the registry (picked up by Spring Boot as a {@code MeterBinder}).
+     *
+     * @param registry the circuit breaker registry
+     * @return the meter binder
+     */
+    @Bean
+    public TaggedCircuitBreakerMetrics circuitBreakerMetrics(CircuitBreakerRegistry registry) {
+        return TaggedCircuitBreakerMetrics.ofCircuitBreakerRegistry(registry);
     }
 
     /**

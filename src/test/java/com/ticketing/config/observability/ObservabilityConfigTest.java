@@ -2,6 +2,9 @@ package com.ticketing.config.observability;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.ticketing.config.properties.TicketingProperties;
 import com.ticketing.enums.RuntimeModeEnum;
 import io.micrometer.context.ContextRegistry;
@@ -9,9 +12,13 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -95,6 +102,48 @@ class ObservabilityConfigTest {
                         .contextWrite(Context.of("correlationId", "corr-42")))
                 .expectNext("corr-42")
                 .verifyComplete();
+    }
+
+    @Test
+    void shouldRestoreTheCorrelationIdAfterAnAsynchronousCompletionOnAForeignThread() {
+        config.afterPropertiesSet();
+        ExecutorService sdkThreads = Executors.newSingleThreadExecutor();
+        try {
+            // like an AWS SDK call: the future completes on a thread Reactor knows nothing about
+            Mono<String> pipeline = Mono.fromFuture(() -> CompletableFuture.supplyAsync(() -> "done", sdkThreads))
+                    .map(value -> value + ":" + MDC.get("correlationId"))
+                    .contextWrite(Context.of("correlationId", "corr-sqs-7"));
+
+            StepVerifier.create(pipeline)
+                    .expectNext("done:corr-sqs-7")
+                    .verifyComplete();
+        } finally {
+            sdkThreads.shutdownNow();
+        }
+    }
+
+    @Test
+    void shouldWriteTheCorrelationIdIntoTheLogEventsOfAReactivePipeline() {
+        config.afterPropertiesSet();
+        Logger logger = (Logger) LoggerFactory.getLogger(
+                ObservabilityConfigTest.class.getName() + ".pipeline");
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            StepVerifier.create(Mono.just("order-1")
+                            .publishOn(Schedulers.parallel())
+                            .doOnNext(orderId -> logger.info("Order {} queued", orderId))
+                            .contextWrite(Context.of("correlationId", "corr-http-9")))
+                    .expectNext("order-1")
+                    .verifyComplete();
+
+            assertThat(appender.list).singleElement()
+                    .satisfies(event -> assertThat(event.getMDCPropertyMap())
+                            .containsEntry("correlationId", "corr-http-9"));
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 
     @Test

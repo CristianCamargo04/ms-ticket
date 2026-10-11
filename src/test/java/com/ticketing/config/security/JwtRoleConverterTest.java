@@ -8,6 +8,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 import org.springframework.security.core.GrantedAuthority;
@@ -79,5 +81,20 @@ class JwtRoleConverterTest {
 
         assertThat(authorities(cognito, jwt("cognito:groups", List.of("admin")))).containsExactly("ROLE_ADMIN");
         assertThat(authorities(cognito, jwt("roles", List.of("admin")))).isEmpty();
+    }
+
+    @ParameterizedTest(name = "roles claim {0}")
+    @ValueSource(strings = {"roles", "cognito:groups"})
+    void shouldMapTheRolesOfTheConfiguredClaimOnly(String rolesClaim) {
+        JwtRoleConverter configured = new JwtRoleConverter(properties(Map.of(
+                "ticketing.security.roles-claim", rolesClaim)));
+        String otherClaim = rolesClaim.equals("roles") ? "cognito:groups" : "roles";
+        Jwt jwt = Jwt.withTokenValue("token").header("alg", "RS256").subject("customer-1")
+                .issuedAt(Instant.parse("2026-10-10T10:00:00Z"))
+                .claim(rolesClaim, List.of("CUSTOMER"))
+                .claim(otherClaim, List.of("ADMIN"))
+                .build();
+
+        assertThat(authorities(configured, jwt)).containsExactly("ROLE_CUSTOMER");
     }
 }

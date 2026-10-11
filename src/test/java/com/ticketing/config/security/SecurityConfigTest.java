@@ -186,6 +186,30 @@ class SecurityConfigTest {
     }
 
     @Test
+    void shouldAcceptCognitoAccessTokensCarryingTheAudienceAsClientId() {
+        OAuth2TokenValidator<Jwt> validator = SecurityConfig.jwtValidator(security(ISSUER, AUDIENCE));
+        Instant inOneHour = Instant.now().plus(Duration.ofHours(1));
+        Jwt cognitoAccessToken = Jwt.withTokenValue("token").header("alg", "RS256")
+                .issuer(ISSUER)
+                .subject("customer-1")
+                .claim("client_id", AUDIENCE)
+                .claim("cognito:groups", List.of("CUSTOMER"))
+                .issuedAt(inOneHour.minus(Duration.ofHours(1)))
+                .expiresAt(inOneHour)
+                .build();
+        Jwt foreignClientToken = Jwt.withTokenValue("token").header("alg", "RS256")
+                .issuer(ISSUER)
+                .subject("customer-1")
+                .claim("client_id", "another-app-client")
+                .issuedAt(inOneHour.minus(Duration.ofHours(1)))
+                .expiresAt(inOneHour)
+                .build();
+
+        assertThat(validator.validate(cognitoAccessToken).hasErrors()).isFalse();
+        assertThat(validator.validate(foreignClientToken).hasErrors()).isTrue();
+    }
+
+    @Test
     void shouldRejectTokensOfOtherIssuersAudiencesOrWithoutSubject() {
         OAuth2TokenValidator<Jwt> validator = SecurityConfig.jwtValidator(security(ISSUER, AUDIENCE));
         Instant inOneHour = Instant.now().plus(Duration.ofHours(1));

@@ -1,5 +1,10 @@
 # AWS dev environment (ECS Fargate). Infrastructure (tables, queues) is owned by Terraform: migrations are disabled.
 # Credentials come from the IAM task role; endpoints are the regional AWS endpoints (no override).
+# Placeholders read the variable names the Terraform task definitions inject (infra/terraform/envs/*/main.tf, the
+# relaxed-binding names such as TICKETING_SECURITY_ISSUER or AWS_DYNAMODB_TABLES_EVENTS), with the older short names
+# (JWT_ISSUER_URI, DYNAMODB_TABLE_EVENTS, ...) as fallbacks. Every placeholder must resolve with Terraform's variables
+# alone: Spring Boot evaluates some of these keys strictly at startup (e.g. the issuer-uri auto-configuration
+# condition), so an unresolvable one aborts the context.
 
 management:
   tracing:
@@ -12,12 +17,12 @@ logging:
       console: ecs
 
 ticketing:
-  runtime-mode: ${TICKETING_RUNTIME_MODE:all}
+  runtime-mode: ${TICKETING_RUNTIMEMODE:${TICKETING_RUNTIME_MODE:all}}
   payment:
-    base-url: ${PAYMENT_GATEWAY_BASE_URL}
+    base-url: ${TICKETING_PAYMENT_BASEURL:${PAYMENT_GATEWAY_BASE_URL}}
   security:
-    audience: ${JWT_AUDIENCE:ms-ticket}
-    issuer: ${JWT_ISSUER_URI}
+    audience: ${TICKETING_SECURITY_AUDIENCE:${JWT_AUDIENCE:ms-ticket}}
+    issuer: ${TICKETING_SECURITY_ISSUER:${JWT_ISSUER_URI}}
   migrations:
     enabled: false
 
@@ -26,20 +31,20 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${JWT_ISSUER_URI}
-          jwk-set-uri: ${JWT_JWK_SET_URI}
+          issuer-uri: ${TICKETING_SECURITY_ISSUER:${JWT_ISSUER_URI}}
+          jwk-set-uri: ${SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWKSETURI:${JWT_JWK_SET_URI}}
 
 aws:
   region: ${AWS_REGION:us-east-1}
   dynamodb:
     tables:
-      events: ${DYNAMODB_TABLE_EVENTS:ticketing-dev-events}
-      tickets: ${DYNAMODB_TABLE_TICKETS:ticketing-dev-tickets}
-      orders: ${DYNAMODB_TABLE_ORDERS:ticketing-dev-orders}
-      ticket-transitions: ${DYNAMODB_TABLE_TICKET_TRANSITIONS:ticketing-dev-ticket-transitions}
-      distributed-locks: ${DYNAMODB_TABLE_DISTRIBUTED_LOCKS:ticketing-dev-distributed-locks}
-      schema-migrations: ${DYNAMODB_TABLE_SCHEMA_MIGRATIONS:ticketing-dev-schema-migrations}
+      events: ${AWS_DYNAMODB_TABLES_EVENTS:${DYNAMODB_TABLE_EVENTS:ticketing-dev-events}}
+      tickets: ${AWS_DYNAMODB_TABLES_TICKETS:${DYNAMODB_TABLE_TICKETS:ticketing-dev-tickets}}
+      orders: ${AWS_DYNAMODB_TABLES_ORDERS:${DYNAMODB_TABLE_ORDERS:ticketing-dev-orders}}
+      ticket-transitions: ${AWS_DYNAMODB_TABLES_TICKETTRANSITIONS:${DYNAMODB_TABLE_TICKET_TRANSITIONS:ticketing-dev-ticket-transitions}}
+      distributed-locks: ${AWS_DYNAMODB_TABLES_DISTRIBUTEDLOCKS:${DYNAMODB_TABLE_DISTRIBUTED_LOCKS:ticketing-dev-distributed-locks}}
+      schema-migrations: ${AWS_DYNAMODB_TABLES_SCHEMAMIGRATIONS:${DYNAMODB_TABLE_SCHEMA_MIGRATIONS:ticketing-dev-schema-migrations}}
     deadline-shards: ${DYNAMODB_DEADLINE_SHARDS:8}
   sqs:
-    order-reservation-queue: ${SQS_ORDER_RESERVATION_QUEUE:ticketing-dev-order-reservation}
-    order-payment-queue: ${SQS_ORDER_PAYMENT_QUEUE:ticketing-dev-order-payment}
+    order-reservation-queue: ${AWS_SQS_ORDERRESERVATIONQUEUE:${SQS_ORDER_RESERVATION_QUEUE:ticketing-dev-order-reservation}}
+    order-payment-queue: ${AWS_SQS_ORDERPAYMENTQUEUE:${SQS_ORDER_PAYMENT_QUEUE:ticketing-dev-order-payment}}

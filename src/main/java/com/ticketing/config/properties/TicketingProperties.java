@@ -176,6 +176,9 @@ public record TicketingProperties(
      * @param callTimeout     overall timeout of a single call (connect + response + body)
      * @param maxRetries      retries on 5xx responses and timeouts (0 disables retries)
      * @param retryBackoff    first backoff between retries
+     * @param apiKey          optional gateway API key ({@code TICKETING_PAYMENT_APIKEY}, injected from Secrets Manager
+     *                        in AWS); when non-blank every call carries {@code Authorization: Bearer <apiKey>}. It is
+     *                        a secret: {@link #toString()} masks it and it is never logged
      */
     public record Payment(
             String baseUrl,
@@ -183,15 +186,43 @@ public record TicketingProperties(
             @DefaultValue("3s") Duration responseTimeout,
             @DefaultValue("4s") Duration callTimeout,
             @DefaultValue("2") int maxRetries,
-            @DefaultValue("100ms") Duration retryBackoff) {
+            @DefaultValue("100ms") Duration retryBackoff,
+            String apiKey) {
+
+        /** Replaces the API key in {@link #toString()}. */
+        static final String MASK = "******";
+
+        /**
+         * Whether an API key is configured.
+         *
+         * @return {@code true} when {@link #apiKey()} is neither {@code null} nor blank
+         */
+        public boolean hasApiKey() {
+            return apiKey != null && !apiKey.isBlank();
+        }
+
+        /**
+         * Every component except the API key, which is masked (never present, even partially).
+         *
+         * @return a log-safe representation
+         */
+        @Override
+        public String toString() {
+            return "Payment[baseUrl=" + baseUrl + ", connectTimeout=" + connectTimeout
+                    + ", responseTimeout=" + responseTimeout + ", callTimeout=" + callTimeout
+                    + ", maxRetries=" + maxRetries + ", retryBackoff=" + retryBackoff
+                    + ", apiKey=" + (hasApiKey() ? MASK : "<none>") + "]";
+        }
     }
 
     /**
      * JWT validation ({@code ticketing.security.*}).
      *
-     * @param audience   required {@code aud} claim value
+     * @param audience   accepted audience: a token is accepted when its {@code aud} claim contains it or its
+     *                   {@code client_id} claim equals it (Cognito access tokens carry {@code client_id}, no
+     *                   {@code aud})
      * @param issuer     required {@code iss} claim value (required, no default)
-     * @param rolesClaim claim holding the role names
+     * @param rolesClaim claim holding the role names ({@code roles}; {@code cognito:groups} with Cognito)
      */
     public record Security(
             @DefaultValue("ms-ticket") String audience,

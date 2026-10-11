@@ -1,0 +1,186 @@
+# Continuous integration of ms-ticket.
+#
+#   build-test : unit tests + JaCoCo gate (line/branch >= 90 %) + ArchUnit + Testcontainers integration tests
+#   docker     : BuildKit image build (OCI labels) + Trivy scan (fails on fixable CRITICAL/HIGH)
+#   shellcheck : every tracked shell script
+#   terraform  : fmt, validate, offline tests (mocked provider), tflint, checkov - no AWS credentials
+#
+# Third-party actions are pinned by major version; trivy-action has no major tag and was hit by a supply-chain
+# incident in 2026, so it is pinned by commit SHA. The workflow holds no secrets: a future deploy job assumes an
+# AWS role through GitHub OIDC (skeleton at the end).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: "25"
+  IMAGE_NAME: ms-ticket
+
+jobs:
+  build-test:
+    name: Build, unit + integration tests, coverage gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Temurin ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # Caches the Gradle user home and validates the wrapper checksum.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # check = test (+ ArchUnit) -> jacocoTestCoverageVerification -> integrationTest (Testcontainers on the
+      # runner's Docker: DynamoDB Local, LocalStack 4.9, mock-oauth2-server, the in-process E2E flow).
+      - name: Gradle check
+        run: ./gradlew check --console=plain
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports
+          path: |
+            build/reports/tests/
+            build/reports/jacoco/
+            build/test-results/
+          retention-days: 14
+          if-no-files-found: warn
+
+  docker:
+    name: Docker image + Trivy scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Image metadata
+        id: meta
+        run: |
+          echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "tag=${IMAGE_NAME}:ci-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ steps.meta.outputs.tag }}
+          build-args: |
+            REVISION=${{ github.sha }}
+            CREATED=${{ steps.meta.outputs.created }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # usr/bin/pebble is Canonical's service manager shipped by the Ubuntu-based eclipse-temurin JRE image (built
+      # with a Go stdlib that has fixable HIGH CVEs upstream). The container never runs it (ENTRYPOINT is java), so
+      # it is excluded here; the proper fix is deleting it in the runtime stage of the Dockerfile, after which this
+      # exclusion must go. Every other package (OS and Java libraries) is gated.
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.meta.outputs.tag }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          skip-files: usr/bin/pebble
+          exit-code: "1"
+          format: table
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # shellcheck is preinstalled on the GitHub-hosted Ubuntu images.
+      - name: Lint shell scripts
+        run: |
+          shellcheck --version
+          git ls-files -z '*.sh' | xargs -0 --no-run-if-empty shellcheck --severity=style
+
+  terraform:
+    name: Terraform static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # fmt -check, then per environment init (no backend) / validate / test (mocked AWS provider), tflint and
+      # checkov; every tool runs in a pinned container image. No AWS credentials are available or needed.
+      - name: Validate infrastructure
+        run: sh infra/terraform/scripts/validate.sh
+
+  # ------------------------------------------------------------------------------------------------------------------
+  # Deployment skeleton (disabled). Keyless AWS access through GitHub OIDC: the job assumes a deploy role whose
+  # trust policy only accepts this repository's main branch / environment
+  # (token.actions.githubusercontent.com:sub = repo:<org>/<repo>:environment:dev). No AWS secret is stored in GitHub.
+  # The same immutable image tag (the git SHA) is promoted from dev to prod (infra/terraform/README.md, section 7).
+  # ------------------------------------------------------------------------------------------------------------------
+  # deploy-dev:
+  #   name: Deploy to dev
+  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  #   needs: [build-test, docker, shellcheck, terraform]
+  #   runs-on: ubuntu-latest
+  #   environment: dev
+  #   permissions:
+  #     contents: read
+  #     id-token: write   # OIDC token for sts:AssumeRoleWithWebIdentity
+  #   env:
+  #     AWS_REGION: us-east-1
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #
+  #     - name: Configure AWS credentials (OIDC)
+  #       uses: aws-actions/configure-aws-credentials@v6
+  #       with:
+  #         role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}   # a repository/environment variable, not a secret
+  #         aws-region: ${{ env.AWS_REGION }}
+  #         role-session-name: ms-ticket-ci-${{ github.run_id }}
+  #
+  #     - name: Log in to Amazon ECR
+  #       id: ecr
+  #       uses: aws-actions/amazon-ecr-login@v2
+  #
+  #     - name: Build and push the image (immutable tag = git SHA)
+  #       uses: docker/build-push-action@v7
+  #       with:
+  #         context: .
+  #         push: true
+  #         tags: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+  #         build-args: |
+  #           REVISION=${{ github.sha }}
+  #
+  #     - name: Set up Terraform
+  #       uses: hashicorp/setup-terraform@v4
+  #
+  #     - name: Terraform apply (rolling ECS deployment with circuit breaker and alarm rollback)
+  #       working-directory: infra/terraform/envs/dev
+  #       run: |
+  #         terraform init -input=false -backend-config=backend.hcl
+  #         terraform apply -input=false -auto-approve -var "image_tag=${GITHUB_SHA}"

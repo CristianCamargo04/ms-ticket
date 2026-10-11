@@ -21,7 +21,9 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Payment gateway HTTP client: a {@link WebClient} on Reactor Netty bound to {@code ticketing.payment.base-url},
  * with TCP connect and response timeouts, its own connection pool, the application JSON mapper and HTTP client
- * observations (metrics/tracing) when an {@link ObservationRegistry} is available. The per-call policy (overall
+ * observations (metrics/tracing) when an {@link ObservationRegistry} is available. When
+ * {@code ticketing.payment.api-key} ({@code TICKETING_PAYMENT_APIKEY}, a Secrets Manager secret in AWS) is non-blank,
+ * every call carries {@code Authorization: Bearer <api-key>}; the key is never logged. The per-call policy (overall
  * timeout, retries, circuit breaker) lives in the client and is configured by {@link PaymentGatewaySettings}.
  */
 @Configuration(proxyBeanMethods = false)
@@ -75,7 +77,7 @@ public class PaymentGatewayClientConfig {
      * @param paymentGatewayConnectionProvider the dedicated connection pool
      * @param jsonMapper                       the application JSON mapper
      * @param observationRegistry              HTTP client observations, when available
-     * @return the web client
+     * @return the web client, sending the bearer API key when one is configured
      * @throws IllegalStateException when the base URL is missing or not an absolute http(s) URL
      */
     @Bean
@@ -87,15 +89,20 @@ public class PaymentGatewayClientConfig {
         HttpClient httpClient = HttpClient.create(paymentGatewayConnectionProvider)
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(payment.connectTimeout().toMillis()))
                 .responseTimeout(payment.responseTimeout());
-        return WebClient.builder()
+        WebClient.Builder builder = WebClient.builder()
                 .baseUrl(validatedBaseUrl(payment.baseUrl()))
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .codecs(codecs -> {
                     codecs.defaultCodecs().jacksonJsonEncoder(new JacksonJsonEncoder(jsonMapper));
                     codecs.defaultCodecs().jacksonJsonDecoder(new JacksonJsonDecoder(jsonMapper));
                 })
-                .observationRegistry(observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP))
-                .build();
+                .observationRegistry(observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP));
+        if (payment.hasApiKey()) {
+            // Default header of every call; the key itself is never logged (see TicketingProperties.Payment).
+            String apiKey = payment.apiKey().strip();
+            builder.defaultHeaders(headers -> headers.setBearerAuth(apiKey));
+        }
+        return builder.build();
     }
 
     /**

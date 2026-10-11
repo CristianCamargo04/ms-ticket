@@ -18,7 +18,6 @@ import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtAudienceValidator;
 import org.springframework.security.oauth2.jwt.JwtClaimNames;
 import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
@@ -44,12 +43,17 @@ import reactor.netty.http.client.HttpClient;
  * <ul>
  *   <li>No session, CSRF, HTTP basic, form login or logout: every request carries its bearer token.</li>
  *   <li>Public: event reads ({@code GET /api/v1/events/**} except the ticket audit trail) and the health, info and
- *       Prometheus actuator endpoints.</li>
+ *       Prometheus actuator endpoints. This also holds when the actuator runs on its own management port
+ *       ({@code management.server.port}, 8081 in AWS): the management child context builds its HTTP handler from the
+ *       {@code WebFilter} beans of the whole context hierarchy, so this chain filters it as well (verified by
+ *       {@code SecurityConfigManagementPortTest}).</li>
  *   <li>ADMIN: event creation, complimentary tickets and the ticket audit trail.</li>
  *   <li>CUSTOMER or ADMIN: orders (ownership is enforced by the use cases).</li>
  *   <li>Everything else requires authentication.</li>
  *   <li>Tokens must be RS256-signed by a key of the JWK set, unexpired, issued by {@code ticketing.security.issuer},
- *       addressed to {@code ticketing.security.audience} and carry a subject. The JWK set is downloaded with
+ *       addressed to {@code ticketing.security.audience} ({@code aud} contains it or {@code client_id} equals it, see
+ *       {@link AudienceOrClientIdValidator}) and carry a subject. Roles come from the claim named by
+ *       {@code ticketing.security.roles-claim} ({@link JwtRoleConverter}). The JWK set is downloaded with
  *       connect/response timeouts and re-downloaded for unknown key ids at most once per
  *       {@link #JWKS_MIN_REFRESH_INTERVAL} ({@link ThrottledJwkSource}).</li>
  *   <li>Failures are rendered as problem details by {@link SecurityProblemHandler}; responses carry HSTS, no-sniff,
@@ -207,7 +211,8 @@ public class SecurityConfig {
     }
 
     /**
-     * Token validation rules: not expired / not before (60 s clock skew), issuer, audience and a non-blank subject.
+     * Token validation rules: not expired / not before (60 s clock skew), issuer, audience ({@code aud} or
+     * {@code client_id}) and a non-blank subject.
      *
      * @param security {@code ticketing.security.*}
      * @return the composite validator
@@ -218,7 +223,7 @@ public class SecurityConfig {
         Assert.hasText(security.audience(), "ticketing.security.audience must be configured");
         List<OAuth2TokenValidator<Jwt>> validators = List.of(
                 new JwtIssuerValidator(security.issuer()),
-                new JwtAudienceValidator(security.audience()),
+                new AudienceOrClientIdValidator(security.audience()),
                 // JwtClaimValidator rejects a missing claim itself; the predicate only sees present values.
                 new JwtClaimValidator<String>(JwtClaimNames.SUB, subject -> !subject.isBlank()));
         return JwtValidators.createDefaultWithValidators(validators);

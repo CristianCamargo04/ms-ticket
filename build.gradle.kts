@@ -23,6 +23,7 @@ val mockitoAgent: Configuration = configurations.create("mockitoAgent")
 dependencies {
     implementation(platform(libs.spring.boot.bom))
     implementation(platform(libs.aws.sdk.bom))
+    implementation(platform(libs.jackson.bom))
     annotationProcessor(platform(libs.spring.boot.bom))
 
     implementation(libs.spring.boot.starter.webflux)
@@ -42,6 +43,7 @@ dependencies {
 
     implementation(libs.resilience4j.reactor)
     implementation(libs.resilience4j.circuitbreaker)
+    implementation(libs.resilience4j.micrometer)
     implementation(libs.bucket4j.core)
 
     annotationProcessor(libs.spring.boot.configuration.processor)
@@ -78,6 +80,7 @@ testing {
                 implementation(libs.reactor.test)
                 implementation(libs.testcontainers.junit)
                 implementation(libs.testcontainers.localstack)
+                implementation(libs.awaitility)
                 implementation(libs.aws.dynamodb)
                 implementation(libs.aws.dynamodb.enhanced)
                 implementation(libs.aws.sqs)

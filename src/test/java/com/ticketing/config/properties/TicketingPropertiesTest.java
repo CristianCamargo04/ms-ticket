@@ -5,7 +5,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ticketing.enums.RuntimeModeEnum;
 import java.time.Duration;
 import java.util.Map;
+import java.io.IOException;
+import java.util.HashMap;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 
@@ -148,5 +157,112 @@ class TicketingPropertiesTest {
                 .isEqualTo("ecs");
         assertThat(YamlBinding.binderFor("application.yml", "application-prod.yml").bind(key, String.class).get())
                 .isEqualTo("ecs");
+    }
+
+    @Test
+    void shouldBindTheOptionalPaymentApiKeyAndNeverPrintIt() {
+        TicketingProperties.Payment withKey = new Binder(new MapConfigurationPropertySource(Map.of(
+                "ticketing.payment.base-url", "https://pay.example",
+                "ticketing.payment.api-key", "sk-live-0123456789")))
+                .bindOrCreate("ticketing", TicketingProperties.class).payment();
+        TicketingProperties.Payment withoutKey = new Binder().bindOrCreate("ticketing", TicketingProperties.class)
+                .payment();
+        TicketingProperties.Payment blankKey = new Binder(new MapConfigurationPropertySource(Map.of(
+                "ticketing.payment.api-key", "  ")))
+                .bindOrCreate("ticketing", TicketingProperties.class).payment();
+
+        assertThat(withKey.apiKey()).isEqualTo("sk-live-0123456789");
+        assertThat(withKey.hasApiKey()).isTrue();
+        assertThat(withKey.toString())
+                .doesNotContain("sk-live", "0123456789")
+                .contains("apiKey=" + TicketingProperties.Payment.MASK, "baseUrl=https://pay.example",
+                        "callTimeout=PT4S", "maxRetries=2");
+        assertThat(withoutKey.apiKey()).isNull();
+        assertThat(withoutKey.hasApiKey()).isFalse();
+        assertThat(withoutKey.toString()).contains("apiKey=<none>");
+        assertThat(blankKey.hasApiKey()).isFalse();
+        assertThat(new Binder(new MapConfigurationPropertySource(Map.of("ticketing.payment.api-key", "k")))
+                .bindOrCreate("ticketing", TicketingProperties.class).toString()).doesNotContain("apiKey=k");
+    }
+
+    @Test
+    void shouldServeTheActuatorOnTheManagementPortBehindTheLoadBalancerInProd() {
+        Binder prod = YamlBinding.binderFor("application.yml", "application-prod.yml");
+        Binder local = YamlBinding.binderFor("application.yml", "application-local.yml");
+
+        assertThat(prod.bind("management.server.port", Integer.class).get()).isEqualTo(8081);
+        assertThat(prod.bind("management.endpoint.health.probes.enabled", Boolean.class).get()).isTrue();
+        assertThat(prod.bind("server.forward-headers-strategy", String.class).get()).isEqualTo("native");
+        assertThat(prod.bind("ticketing.payment.api-key", String.class).isBound()).isFalse();
+        assertThat(local.bind("management.server.port", Integer.class).isBound()).isFalse();
+        assertThat(local.bind("server.forward-headers-strategy", String.class).isBound()).isFalse();
+    }
+
+    /** The variables the Terraform task definitions inject (infra/terraform/envs/{dev,prod}/main.tf), nothing else. */
+    private static Map<String, Object> terraformEnvironment() {
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("AWS_REGION", "eu-west-1");
+        variables.put("AWS_DYNAMODB_TABLES_EVENTS", "tf-events");
+        variables.put("AWS_DYNAMODB_TABLES_TICKETS", "tf-tickets");
+        variables.put("AWS_DYNAMODB_TABLES_ORDERS", "tf-orders");
+        variables.put("AWS_DYNAMODB_TABLES_TICKETTRANSITIONS", "tf-ticket-transitions");
+        variables.put("AWS_DYNAMODB_TABLES_DISTRIBUTEDLOCKS", "tf-distributed-locks");
+        variables.put("AWS_SQS_ORDERRESERVATIONQUEUE", "tf-order-reservation");
+        variables.put("AWS_SQS_ORDERPAYMENTQUEUE", "tf-order-payment");
+        variables.put("TICKETING_MIGRATIONS_ENABLED", "false");
+        variables.put("TICKETING_PAYMENT_BASEURL", "https://pay.example");
+        variables.put("MANAGEMENT_SERVER_PORT", "8081");
+        variables.put("TICKETING_SECURITY_ISSUER", "https://cognito-idp.eu-west-1.amazonaws.com/pool");
+        variables.put("TICKETING_SECURITY_AUDIENCE", "app-client-id");
+        variables.put("TICKETING_SECURITY_ROLESCLAIM", "cognito:groups");
+        variables.put("SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWKSETURI",
+                "https://cognito-idp.eu-west-1.amazonaws.com/pool/.well-known/jwks.json");
+        variables.put("TICKETING_RUNTIME_MODE", "worker");
+        variables.put("TICKETING_RUNTIMEMODE", "worker");
+        return variables;
+    }
+
+    /**
+     * An environment like the one of an ECS task: the injected variables (as a plain source, so only placeholder
+     * resolution is exercised, not relaxed binding) on top of {@code application.yml} and the profile file.
+     */
+    private static StandardEnvironment awsEnvironment(String profileFile) throws IOException {
+        StandardEnvironment environment = new StandardEnvironment();
+        environment.getPropertySources().remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);
+        environment.getPropertySources().remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
+        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
+        for (String resource : new String[] {"application.yml", profileFile}) {
+            for (PropertySource<?> source : loader.load(resource, new ClassPathResource(resource))) {
+                environment.getPropertySources().addFirst(source);
+            }
+        }
+        environment.getPropertySources().addFirst(new MapPropertySource("terraform", terraformEnvironment()));
+        return environment;
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"application-prod.yml", "application-dev.yml"})
+    void shouldResolveEveryAwsProfilePlaceholderWithTheVariablesTerraformInjects(String profileFile)
+            throws IOException {
+        StandardEnvironment environment = awsEnvironment(profileFile);
+
+        // strict resolution, like Spring Boot's auto-configuration conditions: an unresolvable placeholder throws
+        assertThat(environment.getRequiredProperty("spring.security.oauth2.resourceserver.jwt.issuer-uri"))
+                .isEqualTo("https://cognito-idp.eu-west-1.amazonaws.com/pool");
+        assertThat(environment.getRequiredProperty("spring.security.oauth2.resourceserver.jwt.jwk-set-uri"))
+                .endsWith("/pool/.well-known/jwks.json");
+        TicketingProperties ticketing = Binder.get(environment).bindOrCreate("ticketing", TicketingProperties.class);
+        assertThat(ticketing.runtimeMode()).isEqualTo(RuntimeModeEnum.WORKER);
+        assertThat(ticketing.payment().baseUrl()).isEqualTo("https://pay.example");
+        assertThat(ticketing.security().issuer()).isEqualTo("https://cognito-idp.eu-west-1.amazonaws.com/pool");
+        assertThat(ticketing.security().audience()).isEqualTo("app-client-id");
+        assertThat(ticketing.migrations().enabled()).isFalse();
+        AwsProperties aws = Binder.get(environment).bindOrCreate("aws", AwsProperties.class);
+        assertThat(aws.region()).isEqualTo("eu-west-1");
+        assertThat(aws.dynamodb().tables().events()).isEqualTo("tf-events");
+        assertThat(aws.dynamodb().tables().ticketTransitions()).isEqualTo("tf-ticket-transitions");
+        assertThat(aws.dynamodb().tables().distributedLocks()).isEqualTo("tf-distributed-locks");
+        assertThat(aws.sqs().orderReservationQueue()).isEqualTo("tf-order-reservation");
+        assertThat(aws.sqs().orderPaymentQueue()).isEqualTo("tf-order-payment");
     }
 }

@@ -8,7 +8,15 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import io.github.resilience4j.micrometer.tagged.TaggedCircuitBreakerMetrics;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.micrometer.metrics.autoconfigure.CompositeMeterRegistryAutoConfiguration;
+import org.springframework.boot.micrometer.metrics.autoconfigure.MetricsAutoConfiguration;
+import org.springframework.boot.micrometer.metrics.autoconfigure.export.simple.SimpleMetricsExportAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
@@ -105,6 +113,44 @@ class ResilienceConfigTest {
                     CircuitBreaker circuitBreaker = context.getBean(CircuitBreaker.class);
                     assertThat(context).getBean("paymentGatewayCircuitBreaker").isSameAs(circuitBreaker);
                     assertThat(registry.find(ResilienceConfig.PAYMENT_GATEWAY)).containsSame(circuitBreaker);
+                });
+    }
+
+    @Test
+    void shouldPublishTheStateAndCallsOfEveryCircuitBreakerAsMeters() {
+        CircuitBreakerRegistry registry = config.circuitBreakerRegistry();
+        CircuitBreaker circuitBreaker = config.paymentGatewayCircuitBreaker(registry);
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+
+        TaggedCircuitBreakerMetrics binder = config.circuitBreakerMetrics(registry);
+        binder.bindTo(meters);
+        circuitBreaker.onSuccess(1, TimeUnit.MILLISECONDS);
+
+        Gauge closed = meters.get("resilience4j.circuitbreaker.state")
+                .tag("name", ResilienceConfig.PAYMENT_GATEWAY).tag("state", "closed").gauge();
+        assertThat(closed.value()).isEqualTo(1.0);
+        assertThat(meters.find("resilience4j.circuitbreaker.calls")
+                .tag("name", ResilienceConfig.PAYMENT_GATEWAY).tag("kind", "successful").meters()).isNotEmpty();
+        assertThat(meters.find("resilience4j.circuitbreaker.failure.rate")
+                .tag("name", ResilienceConfig.PAYMENT_GATEWAY).gauges()).isNotEmpty();
+
+        circuitBreaker.transitionToOpenState();
+        assertThat(closed.value()).isZero();
+        assertThat(meters.get("resilience4j.circuitbreaker.state")
+                .tag("name", ResilienceConfig.PAYMENT_GATEWAY).tag("state", "open").gauge().value()).isEqualTo(1.0);
+    }
+
+    @Test
+    void shouldLetSpringBootBindTheCircuitBreakerMetricsToTheMeterRegistry() {
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(MetricsAutoConfiguration.class,
+                        CompositeMeterRegistryAutoConfiguration.class, SimpleMetricsExportAutoConfiguration.class))
+                .withUserConfiguration(ResilienceConfig.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed().hasSingleBean(TaggedCircuitBreakerMetrics.class);
+                    MeterRegistry meters = context.getBean(MeterRegistry.class);
+                    assertThat(meters.find("resilience4j.circuitbreaker.state")
+                            .tag("name", ResilienceConfig.PAYMENT_GATEWAY).gauges()).isNotEmpty();
                 });
     }
 }

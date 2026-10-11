@@ -8,6 +8,7 @@ import com.ticketing.config.properties.TicketingProperties;
 import io.micrometer.observation.ObservationRegistry;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import mockwebserver3.MockResponse;
@@ -108,6 +109,49 @@ class PaymentGatewayClientConfigTest {
                     .verify(VERIFY_TIMEOUT);
 
             assertThat(server.takeRequest(1, TimeUnit.SECONDS).getTarget()).isEqualTo("/v1/ping");
+        } finally {
+            provider.dispose();
+        }
+    }
+
+    @Test
+    void shouldSendTheApiKeyAsABearerTokenWhenConfigured() throws InterruptedException {
+        ConnectionProvider provider = config.paymentGatewayConnectionProvider(properties(Map.of()));
+        server.enqueue(new MockResponse.Builder().body("ok").build());
+        try {
+            WebClient webClient = webClient(Map.of("ticketing.payment.api-key", " sk-test-123 "),
+                    JsonMapper.builder().build(), provider);
+
+            StepVerifier.create(webClient.get().uri("/v1/ping").retrieve().bodyToMono(String.class))
+                    .expectNext("ok")
+                    .expectComplete()
+                    .verify(VERIFY_TIMEOUT);
+
+            assertThat(server.takeRequest(1, TimeUnit.SECONDS).getHeaders().get(HttpHeaders.AUTHORIZATION))
+                    .isEqualTo("Bearer sk-test-123");
+        } finally {
+            provider.dispose();
+        }
+    }
+
+    @Test
+    void shouldNotSendAnAuthorizationHeaderWithoutApiKey() throws InterruptedException {
+        ConnectionProvider provider = config.paymentGatewayConnectionProvider(properties(Map.of()));
+        server.enqueue(new MockResponse.Builder().body("ok").build());
+        server.enqueue(new MockResponse.Builder().body("ok").build());
+        try {
+            for (Map<String, String> values : List.of(Map.<String, String>of(),
+                    Map.of("ticketing.payment.api-key", "   "))) {
+                WebClient webClient = webClient(values, JsonMapper.builder().build(), provider);
+
+                StepVerifier.create(webClient.get().uri("/v1/ping").retrieve().bodyToMono(String.class))
+                        .expectNext("ok")
+                        .expectComplete()
+                        .verify(VERIFY_TIMEOUT);
+
+                assertThat(server.takeRequest(1, TimeUnit.SECONDS).getHeaders().get(HttpHeaders.AUTHORIZATION))
+                        .isNull();
+            }
         } finally {
             provider.dispose();
         }

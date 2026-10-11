@@ -44,7 +44,7 @@ class RequestContextResolverImplTest {
                 "ignored-name");
         MockServerHttpRequest request = MockServerHttpRequest.get("/api/v1/orders/o-1")
                 .header(RequestContext.CORRELATION_ID_HEADER, "corr-1")
-                .header(RequestContextResolverImpl.FORWARDED_FOR_HEADER, "203.0.113.7, 10.0.0.1")
+                .header(RequestContextResolverImpl.FORWARDED_FOR_HEADER, "198.51.100.66, 203.0.113.7")
                 .build();
 
         StepVerifier.create(resolveAs(authentication, request))
@@ -115,14 +115,51 @@ class RequestContextResolverImplTest {
         assertThatNullPointerException().isThrownBy(() -> resolver.resolve(null));
     }
 
+    private static InetSocketAddress loadBalancer() throws Exception {
+        return new InetSocketAddress(InetAddress.getByAddress(new byte[] {10, 0, 0, 2}), 4321);
+    }
+
+    private static String clientIpWithForwardedFor(String... headerLines) throws Exception {
+        return RequestContextResolverImpl.clientIpOf(MockServerHttpRequest.get("/")
+                .header(RequestContextResolverImpl.FORWARDED_FOR_HEADER, headerLines)
+                .remoteAddress(loadBalancer())
+                .build());
+    }
+
+    @Test
+    void shouldTakeTheRightmostForwardedForHopAppendedByTheLoadBalancer() throws Exception {
+        assertThat(clientIpWithForwardedFor("203.0.113.7")).isEqualTo("203.0.113.7");
+        // the client forged the first hop; the ALB appended the real peer address
+        assertThat(clientIpWithForwardedFor("1.2.3.4, 203.0.113.7")).isEqualTo("203.0.113.7");
+        assertThat(clientIpWithForwardedFor("1.2.3.4,203.0.113.7 , ")).isEqualTo("203.0.113.7");
+        assertThat(clientIpWithForwardedFor("2001:db8::1")).isEqualTo("2001:db8::1");
+        assertThat(clientIpWithForwardedFor("::ffff:203.0.113.7")).isEqualTo("::ffff:203.0.113.7");
+    }
+
+    @Test
+    void shouldReadRepeatedForwardedForHeadersAsOneList() throws Exception {
+        assertThat(clientIpWithForwardedFor("1.2.3.4", "5.6.7.8, 203.0.113.9")).isEqualTo("203.0.113.9");
+        assertThat(clientIpWithForwardedFor("1.2.3.4, 203.0.113.9", " ")).isEqualTo("203.0.113.9");
+    }
+
     @Test
     void shouldFallBackToTheRemoteAddressWhenForwardedForIsBlank() throws Exception {
-        MockServerHttpRequest request = MockServerHttpRequest.get("/")
-                .header(RequestContextResolverImpl.FORWARDED_FOR_HEADER, " , 10.0.0.9")
-                .remoteAddress(new InetSocketAddress(InetAddress.getByAddress(new byte[] {10, 0, 0, 2}), 4321))
-                .build();
+        assertThat(clientIpWithForwardedFor(" , ")).isEqualTo("10.0.0.2");
+        assertThat(clientIpWithForwardedFor("")).isEqualTo("10.0.0.2");
+    }
 
-        assertThat(RequestContextResolverImpl.clientIpOf(request)).isEqualTo("10.0.0.2");
+    @Test
+    void shouldIgnoreARightmostHopThatIsNotAnIpAddress() throws Exception {
+        assertThat(clientIpWithForwardedFor("203.0.113.7, evil\nINFO forged log line")).isEqualTo("10.0.0.2");
+        assertThat(clientIpWithForwardedFor("unknown")).isEqualTo("10.0.0.2");
+        assertThat(clientIpWithForwardedFor("1".repeat(46))).isEqualTo("10.0.0.2");
+        assertThat(clientIpWithForwardedFor("1")).isEqualTo("10.0.0.2");
+    }
+
+    @Test
+    void shouldUseTheRemoteAddressWithoutForwardedFor() throws Exception {
+        assertThat(RequestContextResolverImpl.clientIpOf(MockServerHttpRequest.get("/")
+                .remoteAddress(loadBalancer()).build())).isEqualTo("10.0.0.2");
     }
 
     @Test

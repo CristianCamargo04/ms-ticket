@@ -1,6 +1,9 @@
 [versions]
 spring-boot = "4.1.1"
 aws-sdk = "2.55.14"
+# Overrides the Jackson 3.1.5 managed by Spring Boot 4.1.1 (fixable HIGH CVEs: CVE-2026-89407, CVE-2026-89425,
+# CVE-2026-68497, CVE-2026-91776, CVE-2026-91777); drop once the Boot BOM manages >= 3.1.7.
+jackson = "3.1.7"
 resilience4j = "2.4.0"
 bucket4j = "8.21.0"
 archunit = "1.5.1"
@@ -11,6 +14,7 @@ mockwebserver = "5.5.0"
 [libraries]
 spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
 aws-sdk-bom = { module = "software.amazon.awssdk:bom", version.ref = "aws-sdk" }
+jackson-bom = { module = "tools.jackson:jackson-bom", version.ref = "jackson" }
 testcontainers-bom = { module = "org.testcontainers:testcontainers-bom", version.ref = "testcontainers" }
 
 spring-boot-starter-webflux = { module = "org.springframework.boot:spring-boot-starter-webflux" }
@@ -31,6 +35,7 @@ aws-sts = { module = "software.amazon.awssdk:sts" }
 
 resilience4j-reactor = { module = "io.github.resilience4j:resilience4j-reactor", version.ref = "resilience4j" }
 resilience4j-circuitbreaker = { module = "io.github.resilience4j:resilience4j-circuitbreaker", version.ref = "resilience4j" }
+resilience4j-micrometer = { module = "io.github.resilience4j:resilience4j-micrometer", version.ref = "resilience4j" }
 bucket4j-core = { module = "com.bucket4j:bucket4j_jdk17-core", version.ref = "bucket4j" }
 
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
@@ -43,6 +48,7 @@ archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref
 mockwebserver = { module = "com.squareup.okhttp3:mockwebserver3-junit5", version.ref = "mockwebserver" }
 testcontainers-junit = { module = "org.testcontainers:testcontainers-junit-jupiter" }
 testcontainers-localstack = { module = "org.testcontainers:testcontainers-localstack" }
+awaitility = { module = "org.awaitility:awaitility" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }

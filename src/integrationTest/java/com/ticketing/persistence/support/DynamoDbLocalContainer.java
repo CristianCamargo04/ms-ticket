@@ -58,6 +58,17 @@ public final class DynamoDbLocalContainer {
     }
 
     /**
+     * The endpoint of the shared DynamoDB Local container, starting it on first use (for applications under test
+     * that build their own client, e.g. {@code aws.endpoint-override.dynamodb-endpoint}).
+     *
+     * @return the HTTP endpoint reachable from the test JVM
+     */
+    public static synchronized URI endpoint() {
+        client();
+        return URI.create("http://" + container.getHost() + ":" + container.getMappedPort(PORT));
+    }
+
+    /**
      * Unique physical table names, so that every test class works on its own tables.
      *
      * @return table names prefixed with a random id
