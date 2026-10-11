@@ -32,6 +32,15 @@
             "roles": ["ADMIN"],
             "aud": ["ms-ticket"]
           }
+        },
+        {
+          "requestParam": "client_id",
+          "match": "load-customer-[A-Za-z0-9-]{1,48}",
+          "claims": {
+            "sub": "${clientId}",
+            "roles": ["CUSTOMER"],
+            "aud": ["ms-ticket"]
+          }
         }
       ]
     }

@@ -1,0 +1,4635 @@
+{
+  "info": {
+    "_postman_id": "a05d2e6f-9eae-5c39-8ae3-54a75c769572",
+    "name": "ms-ticket",
+    "description": "Black-box walkthrough of the ms-ticket API against the local docker compose stack.\n\n* Tokens: the collection pre-request script obtains client_credentials tokens for customer-1, customer-2 and admin from {{authUrl}} (the auth-mock; any client_secret) and caches them.\n* Chained variables (eventId, orderId, ticketId...) are collection variables set by the test scripts.\n* Idempotency-Key headers use {{$guid}} (or a stored key when the replay is the point).\n* Asynchronous states are polled with pm.execution.setNextRequest and a max-attempts guard (maxPollAttempts x pollIntervalMs from the environment).\n* Folders build on each other (01 creates the event, 02 the SOLD order that 03, 04 and 08 reuse): run the whole collection, or start at 01.\n* Folders 12 (hold expiry) and 13 (payment gateway error) adapt to the running configuration: with docker-compose.demo.yml (hold 30 s, confirmation timeout 20 s) they wait for the sweeper; with the normal config they report a SKIPPED test and do not wait 10 / 5 minutes.\n\nRun: npx --yes newman run postman/ms-ticket.postman_collection.json -e postman/local.postman_environment.json",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "id": "30233015-2436-5fa4-af93-08fab72f4186",
+        "type": "text/javascript",
+        "exec": [
+          "// Fetches (and caches until shortly before expiry) the client_credentials tokens of the three local",
+          "// identities from the auth-mock. Tokens MUST come from the host URL ({{authUrl}} = http://localhost:8090/default)",
+          "// because the API validates iss = http://localhost:8090/default.",
+          "const identities = { customer1Token: 'customer-1', customer2Token: 'customer-2', adminToken: 'admin' };",
+          "const now = Date.now();",
+          "Object.keys(identities).forEach((variable) => {",
+          "    const cached = pm.collectionVariables.get(variable);",
+          "    const expiresAt = Number(pm.collectionVariables.get(variable + 'ExpiresAt') || 0);",
+          "    if (cached && expiresAt - 60000 > now) {",
+          "        return;",
+          "    }",
+          "    pm.sendRequest({",
+          "        url: pm.variables.get('authUrl') + '/token',",
+          "        method: 'POST',",
+          "        header: { 'Content-Type': 'application/x-www-form-urlencoded' },",
+          "        body: {",
+          "            mode: 'urlencoded',",
+          "            urlencoded: [",
+          "                { key: 'grant_type', value: 'client_credentials' },",
+          "                { key: 'client_id', value: identities[variable] },",
+          "                { key: 'client_secret', value: 'postman-not-validated-by-the-mock' },",
+          "                { key: 'scope', value: 'ms-ticket' }",
+          "            ]",
+          "        }",
+          "    }, (error, response) => {",
+          "        if (error || response.code !== 200) {",
+          "            console.error('token request failed for ' + identities[variable], error || response.code);",
+          "            return;",
+          "        }",
+          "        const token = response.json();",
+          "        pm.collectionVariables.set(variable, token.access_token);",
+          "        pm.collectionVariables.set(variable + 'ExpiresAt', String(now + token.expires_in * 1000));",
+          "    });",
+          "});"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "id": "4e3166ce-c98f-55cd-82cd-854a54622bd1",
+        "type": "text/javascript",
+        "exec": [
+          "// Cross-cutting checks on every API response (polling repetitions excluded to keep the report readable).",
+          "const isApiCall = pm.request.url.toString().indexOf(pm.variables.get('baseUrl')) === 0;",
+          "if (isApiCall && !/ Poll /.test(pm.info.requestName)) {",
+          "    pm.test('[common] X-Correlation-Id is echoed', () => {",
+          "        pm.expect(pm.response.headers.get('X-Correlation-Id')).to.match(/^[A-Za-z0-9-]{1,64}$/);",
+          "    });",
+          "    if (pm.response.code >= 400) {",
+          "        pm.test('[common] errors are RFC 9457 problem details with an errorCode', () => {",
+          "            pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+          "            pm.expect(pm.response.json()).to.have.property('errorCode');",
+          "        });",
+          "    }",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "customer1Token",
+      "value": ""
+    },
+    {
+      "key": "customer1TokenExpiresAt",
+      "value": ""
+    },
+    {
+      "key": "customer2Token",
+      "value": ""
+    },
+    {
+      "key": "customer2TokenExpiresAt",
+      "value": ""
+    },
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "adminTokenExpiresAt",
+      "value": ""
+    },
+    {
+      "key": "eventDate",
+      "value": ""
+    },
+    {
+      "key": "eventId",
+      "value": ""
+    },
+    {
+      "key": "secondEventId",
+      "value": ""
+    },
+    {
+      "key": "firstListedEventId",
+      "value": ""
+    },
+    {
+      "key": "listCursor",
+      "value": ""
+    },
+    {
+      "key": "orderKey",
+      "value": ""
+    },
+    {
+      "key": "orderId",
+      "value": ""
+    },
+    {
+      "key": "ticketId",
+      "value": ""
+    },
+    {
+      "key": "declinedKey",
+      "value": ""
+    },
+    {
+      "key": "declinedOrderId",
+      "value": ""
+    },
+    {
+      "key": "cancelKey",
+      "value": ""
+    },
+    {
+      "key": "cancelOrderId",
+      "value": ""
+    },
+    {
+      "key": "compOrderId",
+      "value": ""
+    },
+    {
+      "key": "soldOutEventId",
+      "value": ""
+    },
+    {
+      "key": "race1Key",
+      "value": ""
+    },
+    {
+      "key": "raceOrder1",
+      "value": ""
+    },
+    {
+      "key": "race2Key",
+      "value": ""
+    },
+    {
+      "key": "raceOrder2",
+      "value": ""
+    },
+    {
+      "key": "raceState1",
+      "value": ""
+    },
+    {
+      "key": "raceState2",
+      "value": ""
+    },
+    {
+      "key": "burstCodes",
+      "value": ""
+    },
+    {
+      "key": "burst429",
+      "value": ""
+    },
+    {
+      "key": "expiryKey",
+      "value": ""
+    },
+    {
+      "key": "expiryOrderId",
+      "value": ""
+    },
+    {
+      "key": "holdTtlSeconds",
+      "value": ""
+    },
+    {
+      "key": "demoMode",
+      "value": ""
+    },
+    {
+      "key": "errorKey",
+      "value": ""
+    },
+    {
+      "key": "errorOrderId",
+      "value": ""
+    },
+    {
+      "key": "pollAttempts",
+      "value": ""
+    },
+    {
+      "key": "pollTarget",
+      "value": ""
+    },
+    {
+      "key": "pollMaxAttempts",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "id": "e2c36937-13e8-575e-b7df-967b5e0d32ff",
+      "name": "00 Health",
+      "description": "Actuator probes (public).",
+      "item": [
+        {
+          "id": "b41cd5e4-3967-5f48-a173-5038f6fd3813",
+          "name": "00.1 Readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/health/readiness",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "health",
+                "readiness"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "d6da0c25-0a76-5ff8-ae24-7d7b4ab22f88",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 UP', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().status).to.eql('UP');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "2aa167c0-acd7-519d-8b4e-3cfbe3bc8d83",
+          "name": "00.2 Token from the auth-mock (client_credentials)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{authUrl}}/token",
+              "host": [
+                "{{authUrl}}"
+              ],
+              "path": [
+                "token"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "The collection pre-request script does this for customer-1, customer-2 and admin; this request only shows the raw call. Any client_secret is accepted by the mock.",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "client_id",
+                  "value": "customer-1"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "any"
+                },
+                {
+                  "key": "scope",
+                  "value": "ms-ticket"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "7269c123-33e6-5fbd-be82-5e3801134802",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 with an access token', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().access_token).to.be.a('string');",
+                  "});",
+                  "const payload = JSON.parse(atob(pm.response.json().access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "pm.test('claims: sub, roles, aud and the host-side issuer', () => {",
+                  "    pm.expect(payload.sub).to.eql('customer-1');",
+                  "    pm.expect(payload.roles).to.eql(['CUSTOMER']);",
+                  "    pm.expect(payload.iss).to.eql(pm.variables.get('authUrl'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fe3e91a1-44ff-54a9-a4bb-c7eac3fc584b",
+      "name": "01 Events",
+      "description": "Event creation (ADMIN), reads, cursor pagination and validation.",
+      "item": [
+        {
+          "id": "2ea7a9f3-0244-5b6f-8030-86ad259021c4",
+          "name": "01.1 Create event (ADMIN) -> 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman walkthrough\",\n  \"venue\": \"Arena Norte\",\n  \"eventDate\": \"{{eventDate}}\",\n  \"totalCapacity\": 20,\n  \"ticketPrice\": 75.50,\n  \"currency\": \"USD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "ad27328a-2fe3-53c5-89cf-5aa0d18fae5d",
+                "type": "text/javascript",
+                "exec": [
+                  "// Event dates must be in the future.",
+                  "pm.collectionVariables.set('eventDate', new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "2e5a7597-b9a6-5d67-b122-0faa95077a12",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const event = pm.response.json();",
+                  "pm.test('Location points to the new event', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/events/' + event.eventId);",
+                  "});",
+                  "pm.test('tickets generated and event ON_SALE', () => {",
+                  "    pm.expect(event.status).to.eql('ON_SALE');",
+                  "    pm.expect(event.availableTickets).to.eql(20);",
+                  "});",
+                  "pm.collectionVariables.set('eventId', event.eventId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "f3d13937-278f-5989-93bc-e557ff33554e",
+          "name": "01.2 Get event (public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "9bd55150-2f7d-516e-a4d5-01b1c04fdd70",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('same event, 20 tickets available', () => {",
+                  "    const event = pm.response.json();",
+                  "    pm.expect(event.eventId).to.eql(pm.collectionVariables.get('eventId'));",
+                  "    pm.expect(event.availableTickets).to.eql(20);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "70711eb4-611f-50aa-a5af-9324f35d2aec",
+          "name": "01.3 Create a second event (for pagination)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman walkthrough (page 2)\",\n  \"venue\": \"Arena Norte\",\n  \"eventDate\": \"{{eventDate}}\",\n  \"totalCapacity\": 5,\n  \"ticketPrice\": 75.50,\n  \"currency\": \"USD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "c43fcfc4-addc-5f2e-9247-9b52221f97a4",
+                "type": "text/javascript",
+                "exec": [
+                  "// Event dates must be in the future.",
+                  "pm.collectionVariables.set('eventDate', new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "f7936d4b-276e-5a0d-b698-37372a38a629",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const event = pm.response.json();",
+                  "pm.test('Location points to the new event', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/events/' + event.eventId);",
+                  "});",
+                  "pm.test('tickets generated and event ON_SALE', () => {",
+                  "    pm.expect(event.status).to.eql('ON_SALE');",
+                  "    pm.expect(event.availableTickets).to.eql(5);",
+                  "});",
+                  "pm.collectionVariables.set('secondEventId', event.eventId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "0f4740f6-f42f-5a6c-bfd1-4c7ab8c53a0c",
+          "name": "01.4 List events, page 1 (limit=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events?status=ON_SALE&limit=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "ON_SALE"
+                },
+                {
+                  "key": "limit",
+                  "value": "1"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "11c96ad6-bb6e-5690-bfcd-0c0153d49820",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test('one item and an opaque nextCursor', () => {",
+                  "    pm.expect(page.items).to.have.length(1);",
+                  "    pm.expect(page.nextCursor).to.be.a('string');",
+                  "});",
+                  "pm.collectionVariables.set('firstListedEventId', page.items[0].eventId);",
+                  "pm.collectionVariables.set('listCursor', encodeURIComponent(page.nextCursor));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "1f6a1021-defd-50be-bb68-43a81dccb0e1",
+          "name": "01.5 List events, page 2 (cursor)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events?status=ON_SALE&limit=1&cursor={{listCursor}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "ON_SALE"
+                },
+                {
+                  "key": "limit",
+                  "value": "1"
+                },
+                {
+                  "key": "cursor",
+                  "value": "{{listCursor}}"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "76076e63-38c8-5339-be98-fc7be76b06e3",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('page 2 continues after page 1', () => {",
+                  "    const page = pm.response.json();",
+                  "    pm.expect(page.items).to.have.length(1);",
+                  "    pm.expect(page.items[0].eventId).to.not.eql(pm.collectionVariables.get('firstListedEventId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "5f56f59a-0e59-5889-a5c8-ad000e9cafac",
+          "name": "01.6 Malformed cursor -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events?limit=1&cursor=not-a-cursor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "1"
+                },
+                {
+                  "key": "cursor",
+                  "value": "not-a-cursor"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "253c2b36-a0cb-5e5c-986f-bc7cefb00bae",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 VALIDATION_ERROR', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "cb18956f-0920-5e35-be6d-20ff14ccd97b",
+          "name": "01.7 Invalid event -> 400 with field errors",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"venue\": \"Arena\",\n  \"eventDate\": \"2020-01-01T00:00:00Z\",\n  \"totalCapacity\": 0,\n  \"ticketPrice\": -1,\n  \"currency\": \"usd\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "388ca70c-4edd-5f64-b5bd-c4b2e93c094c",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 VALIDATION_ERROR', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR');",
+                  "});",
+                  "",
+                  "pm.test('field errors listed', () => {",
+                  "    const fields = pm.response.json().errors.map((e) => e.field);",
+                  "    pm.expect(fields).to.include.members(['name', 'eventDate', 'totalCapacity', 'ticketPrice', 'currency']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "e9178b83-ab79-5c52-82ad-21f1a0f8a956",
+          "name": "01.8 Unknown event -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/00000000-0000-0000-0000-000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "00000000-0000-0000-0000-000000000000"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "9941681b-4411-539c-ab01-58acc3bd02c8",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 EVENT_NOT_FOUND', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('EVENT_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "52892666-68cf-5a11-9896-f9c5788af88c",
+          "name": "01.9 Availability (public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "availability"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "6b5843f8-2707-5be0-98f0-3056949ba025",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('counters add up to the capacity (no ticket lost or duplicated)', () => {",
+                  "    pm.expect(a.available + a.reserved + a.pendingConfirmation + a.sold + a.complimentary).to.eql(a.totalCapacity);",
+                  "});",
+                  "pm.test('no oversell: sold + held + complimentary <= capacity', () => {",
+                  "    pm.expect(a.sold + a.reserved + a.pendingConfirmation + a.complimentary).to.be.at.most(a.totalCapacity);",
+                  "});",
+                  "",
+                  "pm.test('all 20 tickets available', () => pm.expect(pm.response.json().available).to.eql(20));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "00841b06-2d63-57a8-aaab-1dcfa9008079",
+      "name": "02 Purchase (happy path)",
+      "description": "Place order -> 202 + Location -> consumer reserves (RESERVED, 10 min hold) -> confirm with tok_approved -> PENDING_CONFIRMATION -> payment consumer -> SOLD.",
+      "item": [
+        {
+          "id": "185c031e-c334-546f-a315-c9ab9c950a22",
+          "name": "02.1 Place order (customer-1, 2 tickets) -> 202",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{orderKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 2}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "bac97712-6af1-57f4-a232-31fac0fa4ef7",
+                "type": "text/javascript",
+                "exec": [
+                  "// Fresh idempotency key for this order (kept in orderKey so it can be replayed).",
+                  "pm.collectionVariables.set('orderKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "7893c865-9f17-55e7-8328-cb0f91a94e22",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('Location points to the order status resource', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/orders/' + body.orderId);",
+                  "    pm.expect(body.statusUrl).to.eql('/api/v1/orders/' + body.orderId);",
+                  "});",
+                  "pm.test('order is queued (tickets not held yet)', () => {",
+                  "    pm.expect(body.status).to.eql('AVAILABLE');",
+                  "    pm.expect(body.processingStatus).to.eql('QUEUED');",
+                  "});",
+                  "pm.collectionVariables.set('orderId', body.orderId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "50f7d118-dc95-5f5d-8e10-879220990648",
+          "name": "02.2 Poll until RESERVED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "0b41ceea-d8d2-5428-8da4-955272d63ffc",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches RESERVED/ACTIVE (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'RESERVED/ACTIVE');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "9b702afb-949c-50d5-b00a-b3d138c5758b",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}",
+                  "",
+                  "if (reached) {",
+                  "    const order = pm.response.json();",
+                  "    pm.test('two tickets held until holdExpiresAt', () => {",
+                  "        pm.expect(order.ticketIds).to.have.length(2);",
+                  "        pm.expect(new Date(order.holdExpiresAt).getTime()).to.be.above(Date.now() - 5000);",
+                  "    });",
+                  "    pm.collectionVariables.set('ticketId', order.ticketIds[0]);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "7f1a7049-6858-531b-b85e-b4f12301a575",
+          "name": "02.3 Availability shows 2 reserved",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "availability"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "5cecca3c-eda3-5eb7-802d-1f08278d7082",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('counters add up to the capacity (no ticket lost or duplicated)', () => {",
+                  "    pm.expect(a.available + a.reserved + a.pendingConfirmation + a.sold + a.complimentary).to.eql(a.totalCapacity);",
+                  "});",
+                  "pm.test('no oversell: sold + held + complimentary <= capacity', () => {",
+                  "    pm.expect(a.sold + a.reserved + a.pendingConfirmation + a.complimentary).to.be.at.most(a.totalCapacity);",
+                  "});",
+                  "",
+                  "pm.test('2 reserved', () => pm.expect(pm.response.json().reserved).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "7a0667df-1eea-5cc1-a3fe-17f8e05c47ca",
+          "name": "02.4 Confirm (tok_approved) -> 202 PENDING_CONFIRMATION",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/confirmation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}",
+                "confirmation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"paymentToken\": \"tok_approved\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "08fb4431-1748-5692-9a35-985a3f82b66f",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "pm.test('tickets PENDING_CONFIRMATION while the payment is processed', () => {",
+                  "    pm.expect(pm.response.json().status).to.eql('PENDING_CONFIRMATION');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "ae28d497-6421-520c-93a3-778b3bbc762b",
+          "name": "02.5 Poll until SOLD",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "37518079-5941-59ba-a870-71b4a6259149",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches SOLD/COMPLETED (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'SOLD/COMPLETED');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "7e18b593-c07e-5988-9dfc-e58307dfa003",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "bb20cb58-d9ff-536a-ba3f-8952fba1f8a1",
+          "name": "02.6 Availability shows 2 sold",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "availability"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "a8179810-fe1a-5a8c-b865-75c56d5bf828",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('counters add up to the capacity (no ticket lost or duplicated)', () => {",
+                  "    pm.expect(a.available + a.reserved + a.pendingConfirmation + a.sold + a.complimentary).to.eql(a.totalCapacity);",
+                  "});",
+                  "pm.test('no oversell: sold + held + complimentary <= capacity', () => {",
+                  "    pm.expect(a.sold + a.reserved + a.pendingConfirmation + a.complimentary).to.be.at.most(a.totalCapacity);",
+                  "});",
+                  "",
+                  "pm.test('2 sold, none held', () => {",
+                  "    const a = pm.response.json();",
+                  "    pm.expect(a.sold).to.eql(2);",
+                  "    pm.expect(a.reserved + a.pendingConfirmation).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "f492edc1-8180-51a5-94f8-6cab2beae9a0",
+          "name": "02.7 Confirm again -> no-op (SOLD)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/confirmation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}",
+                "confirmation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"paymentToken\": \"tok_approved\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "f57d60b8-d21f-5e5b-aa7c-7b77e7138628",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 and still SOLD (confirmation is idempotent by order state)', () => {",
+                  "    pm.response.to.have.status(202);",
+                  "    pm.expect(pm.response.json().status).to.eql('SOLD');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0a2cfcda-bb61-5b3b-8f2d-7a6ff9ac83f1",
+      "name": "03 Idempotency",
+      "description": "Idempotency-Key semantics: same key + same body replays the order, same key + other body is rejected, malformed or missing keys are rejected.",
+      "item": [
+        {
+          "id": "7aaf7fba-a56d-517c-b9d2-e6339fd3bc51",
+          "name": "03.1 Replay same key + same body -> same orderId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{orderKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 2}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "0ba5437d-15de-5ad1-a7ef-26dff5039016",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 with the original orderId (no second order)', () => {",
+                  "    pm.response.to.have.status(202);",
+                  "    pm.expect(pm.response.json().orderId).to.eql(pm.collectionVariables.get('orderId'));",
+                  "});",
+                  "pm.test('replay reports the current state (SOLD)', () => pm.expect(pm.response.json().status).to.eql('SOLD'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "630e9a69-fd17-550a-8c25-21fe4d834be7",
+          "name": "03.2 Same key + different body -> 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{orderKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 3}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "cf55852f-ee66-5cf6-9ad7-aad340414c8c",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 IDEMPOTENCY_KEY_REUSED', () => {",
+                  "    pm.response.to.have.status(422);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('IDEMPOTENCY_KEY_REUSED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "b3a9850d-9153-5136-a627-cebf8ddcb427",
+          "name": "03.3 Missing Idempotency-Key -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "f9e9a67f-0468-5e8e-94a4-ea31433cf91f",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 INVALID_IDEMPOTENCY_KEY', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('INVALID_IDEMPOTENCY_KEY');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "741e6f8e-d336-5094-832a-5722e2556a8b",
+          "name": "03.4 Malformed Idempotency-Key -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "bad_key!"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "d6d70bf9-c240-5ab0-af2b-a92d2a68e1f4",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 INVALID_IDEMPOTENCY_KEY', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('INVALID_IDEMPOTENCY_KEY');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "a2d31d28-a27c-5d45-b6c6-29173c4577a6",
+          "name": "03.5 Quantity above 10 -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 11}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "5160095d-fd5e-5074-a26b-7a8e5d37d3b8",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 VALIDATION_ERROR', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "58ff6119-1077-5444-9a8e-16256a745e42",
+      "name": "04 Ownership (anti-IDOR)",
+      "description": "Orders are only visible to their owner (other customers get 404, not 403, so existence is not leaked) and to ADMIN.",
+      "item": [
+        {
+          "id": "ead98290-2580-5d09-84c9-da726787fd24",
+          "name": "04.1 Owner reads the order -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "3e99a6ff-92f0-59eb-b292-68269eb66b79",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('SOLD order with its tickets', () => {",
+                  "    const order = pm.response.json();",
+                  "    pm.expect(order.status).to.eql('SOLD');",
+                  "    pm.expect(order.ticketIds).to.include(pm.collectionVariables.get('ticketId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "d68dbe13-aafc-5db2-8678-b2b76fbe57cc",
+          "name": "04.2 Other customer reads it -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "9680a06b-5314-5e94-b2af-eb6912af2742",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 ORDER_NOT_FOUND', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('ORDER_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "4f3f583d-8e79-5c85-a761-ae4256f81f95",
+          "name": "04.3 Other customer confirms it -> 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/confirmation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}",
+                "confirmation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer2Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"paymentToken\": \"tok_approved\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "29352b78-ce66-5bf3-9cd3-e5e77a0b64cb",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 ORDER_NOT_FOUND', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('ORDER_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "1707eea4-5e5b-5635-894f-6a30223e3521",
+          "name": "04.4 Other customer cancels it -> 404",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/reservation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}",
+                "reservation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "1edba19e-9cc5-5687-8d52-c7805f79fed6",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 ORDER_NOT_FOUND', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('ORDER_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "18e557aa-d781-5311-b54f-1c24ecff4878",
+          "name": "04.5 ADMIN reads any order -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "45c42d84-5619-5c50-bc9e-8ae17aeda37e",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "61a64f61-507c-56f4-96fd-150480eaf9eb",
+      "name": "05 Payment declined",
+      "description": "tok_declined: the payment consumer releases the tickets (PENDING_CONFIRMATION -> AVAILABLE) and the order ends PAYMENT_DECLINED.",
+      "item": [
+        {
+          "id": "9bb4f9b8-f3a9-5c45-8de4-ebf2abf0bdb3",
+          "name": "05.1 Place order (1 ticket)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{declinedKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "a1a3021b-18ab-5d86-8324-39df9561e432",
+                "type": "text/javascript",
+                "exec": [
+                  "// Fresh idempotency key for this order (kept in declinedKey so it can be replayed).",
+                  "pm.collectionVariables.set('declinedKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "2afb18fe-b746-5724-82f2-bc66172b3ef9",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('Location points to the order status resource', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/orders/' + body.orderId);",
+                  "    pm.expect(body.statusUrl).to.eql('/api/v1/orders/' + body.orderId);",
+                  "});",
+                  "pm.test('order is queued (tickets not held yet)', () => {",
+                  "    pm.expect(body.status).to.eql('AVAILABLE');",
+                  "    pm.expect(body.processingStatus).to.eql('QUEUED');",
+                  "});",
+                  "pm.collectionVariables.set('declinedOrderId', body.orderId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "b142ecf2-e135-533f-bda2-d6ecab5a7f41",
+          "name": "05.2 Poll until RESERVED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{declinedOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{declinedOrderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "69d5db76-0157-5ea1-be80-3cfc5a26f82b",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches RESERVED/ACTIVE (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'RESERVED/ACTIVE');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "4b688dde-2d9b-5528-8e1c-ac3a163095dd",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "c01cf223-17a4-5697-ae5f-7e0740ed1b27",
+          "name": "05.3 Confirm with tok_declined -> 202",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{declinedOrderId}}/confirmation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{declinedOrderId}}",
+                "confirmation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"paymentToken\": \"tok_declined\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "875f108e-f8e4-5a5a-852a-e10462087335",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 PENDING_CONFIRMATION', () => {",
+                  "    pm.response.to.have.status(202);",
+                  "    pm.expect(pm.response.json().status).to.eql('PENDING_CONFIRMATION');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "ee41d6e4-077e-5614-8f9b-ce876128d06f",
+          "name": "05.4 Poll until PAYMENT_DECLINED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{declinedOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{declinedOrderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "24c29c42-bc33-55b9-ba94-55ee9fb3ccfc",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches AVAILABLE/PAYMENT_DECLINED (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'AVAILABLE/PAYMENT_DECLINED');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "5fad0fd6-f9e1-5e95-9c59-1df26e56b45f",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}",
+                  "",
+                  "if (reached) {",
+                  "    pm.test('reason PAYMENT_DECLINED', () => pm.expect(pm.response.json().reason).to.eql('PAYMENT_DECLINED'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "3178e44a-9205-5ae9-b30a-f02450cee0ee",
+          "name": "05.5 Availability: declined ticket released",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "availability"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "e66957e5-8461-52d7-9558-7b0f30cab43c",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('counters add up to the capacity (no ticket lost or duplicated)', () => {",
+                  "    pm.expect(a.available + a.reserved + a.pendingConfirmation + a.sold + a.complimentary).to.eql(a.totalCapacity);",
+                  "});",
+                  "pm.test('no oversell: sold + held + complimentary <= capacity', () => {",
+                  "    pm.expect(a.sold + a.reserved + a.pendingConfirmation + a.complimentary).to.be.at.most(a.totalCapacity);",
+                  "});",
+                  "",
+                  "pm.test('nothing held, 2 sold', () => {",
+                  "    const a = pm.response.json();",
+                  "    pm.expect(a.reserved + a.pendingConfirmation).to.eql(0);",
+                  "    pm.expect(a.sold).to.eql(2);",
+                  "    pm.expect(a.available).to.eql(18);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bf1f55ba-2df4-5f2c-831f-224841ccf397",
+      "name": "06 Cancel reservation",
+      "description": "DELETE /orders/{id}/reservation releases a RESERVED order (RESERVED -> AVAILABLE, order CANCELLED).",
+      "item": [
+        {
+          "id": "b505629a-a640-5ac5-9c80-9fec72c0ecff",
+          "name": "06.1 Place order (2 tickets)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{cancelKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 2}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "8a40ceec-5f5d-5c98-9761-1e5eddfdab8f",
+                "type": "text/javascript",
+                "exec": [
+                  "// Fresh idempotency key for this order (kept in cancelKey so it can be replayed).",
+                  "pm.collectionVariables.set('cancelKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "7cb4fed6-440b-555e-830a-9e8dcdb19f03",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('Location points to the order status resource', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/orders/' + body.orderId);",
+                  "    pm.expect(body.statusUrl).to.eql('/api/v1/orders/' + body.orderId);",
+                  "});",
+                  "pm.test('order is queued (tickets not held yet)', () => {",
+                  "    pm.expect(body.status).to.eql('AVAILABLE');",
+                  "    pm.expect(body.processingStatus).to.eql('QUEUED');",
+                  "});",
+                  "pm.collectionVariables.set('cancelOrderId', body.orderId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "97f66ed4-e9d9-5f7c-ab45-1a7f9606d1cc",
+          "name": "06.2 Poll until RESERVED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{cancelOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{cancelOrderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "9e34b038-0be2-5eb5-a18d-8c4233e6acf5",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches RESERVED/ACTIVE (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'RESERVED/ACTIVE');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "d41756b3-e16f-5f99-8632-a019a7477401",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "7a580f0b-d094-5b27-8dbe-4096ba437628",
+          "name": "06.3 Cancel -> 202 CANCELLED",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{cancelOrderId}}/reservation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{cancelOrderId}}",
+                "reservation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "00aa33c2-a0f6-52f7-8ce6-03ddf5192548",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 CANCELLED, tickets AVAILABLE', () => {",
+                  "    pm.response.to.have.status(202);",
+                  "    const order = pm.response.json();",
+                  "    pm.expect(order.processingStatus).to.eql('CANCELLED');",
+                  "    pm.expect(order.status).to.eql('AVAILABLE');",
+                  "    pm.expect(order.reason).to.eql('CUSTOMER_CANCELLATION');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "307a5014-f423-5b8b-b31a-60278abe981b",
+          "name": "06.4 Confirm a cancelled order -> 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{cancelOrderId}}/confirmation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{cancelOrderId}}",
+                "confirmation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"paymentToken\": \"tok_approved\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "6f8c4c8f-a0c6-5184-89d9-ff5971c2431e",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 INVALID_ORDER_STATE', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('INVALID_ORDER_STATE');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "d8dc3f2f-5492-599b-bfc9-55690f3d4e62",
+          "name": "06.5 Availability: tickets released",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "availability"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "3ccf9a79-54a6-537b-8a91-1155fbc1086f",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('counters add up to the capacity (no ticket lost or duplicated)', () => {",
+                  "    pm.expect(a.available + a.reserved + a.pendingConfirmation + a.sold + a.complimentary).to.eql(a.totalCapacity);",
+                  "});",
+                  "pm.test('no oversell: sold + held + complimentary <= capacity', () => {",
+                  "    pm.expect(a.sold + a.reserved + a.pendingConfirmation + a.complimentary).to.be.at.most(a.totalCapacity);",
+                  "});",
+                  "",
+                  "pm.test('18 available again', () => pm.expect(pm.response.json().available).to.eql(18));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ff457ced-7983-5196-baeb-5d225923e23e",
+      "name": "07 Complimentary tickets (ADMIN)",
+      "description": "Courtesy tickets: AVAILABLE -> COMPLIMENTARY (final, counted apart from sales).",
+      "item": [
+        {
+          "id": "77923b4f-da28-5416-98c9-5477505e321a",
+          "name": "07.1 Issue 2 complimentary tickets (ADMIN) -> 202",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/complimentary-tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "complimentary-tickets"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"beneficiaryId\": \"vip-guest-1\",\n  \"quantity\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "5f08380d-0223-5b18-9351-459e0acd50e4",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('compOrderId', pm.response.json().orderId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "f56609f1-df46-52e2-82e1-6c16872292b4",
+          "name": "07.2 Poll until COMPLIMENTARY",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{compOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{compOrderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "5cde9199-6193-5228-b8c7-41b7557b9278",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches COMPLIMENTARY/COMPLETED (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'COMPLIMENTARY/COMPLETED');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "96456763-70ad-5038-b52a-30954a5c5534",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "a11a7dd3-7e46-5c4d-a917-6fa92bd08e3c",
+          "name": "07.3 Availability: complimentary counter",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "availability"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "bb90f393-8dee-55e7-8b2c-a88bc98acad8",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('counters add up to the capacity (no ticket lost or duplicated)', () => {",
+                  "    pm.expect(a.available + a.reserved + a.pendingConfirmation + a.sold + a.complimentary).to.eql(a.totalCapacity);",
+                  "});",
+                  "pm.test('no oversell: sold + held + complimentary <= capacity', () => {",
+                  "    pm.expect(a.sold + a.reserved + a.pendingConfirmation + a.complimentary).to.be.at.most(a.totalCapacity);",
+                  "});",
+                  "",
+                  "pm.test('2 complimentary, sales unchanged', () => {",
+                  "    const a = pm.response.json();",
+                  "    pm.expect(a.complimentary).to.eql(2);",
+                  "    pm.expect(a.sold).to.eql(2);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "09f35e39-903b-58f8-84c5-d9ce7cdd0b68",
+          "name": "07.4 CUSTOMER issuing complimentary -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/complimentary-tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "complimentary-tickets"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"beneficiaryId\": \"me\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "1de51d32-e2e5-5276-a635-a7731b376629",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 FORBIDDEN', () => {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('FORBIDDEN');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cbe4c53d-9fad-5eaa-9d5b-2202d61f2da8",
+      "name": "08 Ticket audit trail (ADMIN)",
+      "description": "Every ticket transition is written in the same DynamoDB transaction as the state change.",
+      "item": [
+        {
+          "id": "4ae7f828-fd7a-5eaa-8339-406d396d3a6f",
+          "name": "08.1 Transitions of a sold ticket (ADMIN)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/tickets/{{ticketId}}/transitions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "tickets",
+                "{{ticketId}}",
+                "transitions"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "af2b5fd8-293d-5423-b243-c97bdc6426d6",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('RESERVATION -> CUSTOMER_CONFIRMATION -> PAYMENT_APPROVED, in order', () => {",
+                  "    const history = pm.response.json();",
+                  "    pm.expect(history.map((t) => t.reason)).to.eql(['RESERVATION', 'CUSTOMER_CONFIRMATION', 'PAYMENT_APPROVED']);",
+                  "    pm.expect(history.map((t) => t.toStatus)).to.eql(['RESERVED', 'PENDING_CONFIRMATION', 'SOLD']);",
+                  "    history.forEach((t) => pm.expect(t.orderId).to.eql(pm.collectionVariables.get('orderId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "24ecbe27-315e-50d8-917d-5c1fe35d8fc9",
+          "name": "08.2 Transitions as CUSTOMER -> 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/tickets/{{ticketId}}/transitions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "tickets",
+                "{{ticketId}}",
+                "transitions"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "7c603a5c-ddcf-50be-8f29-db9d1caa8316",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 FORBIDDEN', () => {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('FORBIDDEN');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2352a977-a206-57a4-995d-92c222285aef",
+      "name": "09 Sold out",
+      "description": "One seat, two customers: both are admitted (the admission check reads a 2 s cached counter), the consumer's conditional transaction lets exactly one win and rejects the other with SOLD_OUT. Once the cache sees 0, new orders get 409 at admission.",
+      "item": [
+        {
+          "id": "08f20215-26f9-5034-bd7c-007e9e95b3f8",
+          "name": "09.1 Create a 1-seat event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman single seat\",\n  \"venue\": \"Arena Norte\",\n  \"eventDate\": \"{{eventDate}}\",\n  \"totalCapacity\": 1,\n  \"ticketPrice\": 75.50,\n  \"currency\": \"USD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "7be7b9ef-4d51-5d57-bb01-e059d668fb58",
+                "type": "text/javascript",
+                "exec": [
+                  "// Event dates must be in the future.",
+                  "pm.collectionVariables.set('eventDate', new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "f4ea3cd1-051b-5622-adc8-d20afc728643",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const event = pm.response.json();",
+                  "pm.test('Location points to the new event', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/events/' + event.eventId);",
+                  "});",
+                  "pm.test('tickets generated and event ON_SALE', () => {",
+                  "    pm.expect(event.status).to.eql('ON_SALE');",
+                  "    pm.expect(event.availableTickets).to.eql(1);",
+                  "});",
+                  "pm.collectionVariables.set('soldOutEventId', event.eventId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "f891da33-a8fb-5e0e-b106-1e33bfd22341",
+          "name": "09.2 customer-1 orders the seat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{race1Key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{soldOutEventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{soldOutEventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "bffca48d-285c-58b2-9a3a-1d24ccbdb3ca",
+                "type": "text/javascript",
+                "exec": [
+                  "// Fresh idempotency key for this order (kept in race1Key so it can be replayed).",
+                  "pm.collectionVariables.set('race1Key', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "755e71c0-68a6-5382-800d-bb40e13bad21",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('Location points to the order status resource', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/orders/' + body.orderId);",
+                  "    pm.expect(body.statusUrl).to.eql('/api/v1/orders/' + body.orderId);",
+                  "});",
+                  "pm.test('order is queued (tickets not held yet)', () => {",
+                  "    pm.expect(body.status).to.eql('AVAILABLE');",
+                  "    pm.expect(body.processingStatus).to.eql('QUEUED');",
+                  "});",
+                  "pm.collectionVariables.set('raceOrder1', body.orderId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "0a2f49e9-1fad-511a-afd7-1f634ca1f4c8",
+          "name": "09.3 customer-2 orders the same seat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{race2Key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{soldOutEventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{soldOutEventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer2Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "d996dcce-f521-556e-9eca-c61c9edd8cad",
+                "type": "text/javascript",
+                "exec": [
+                  "// Fresh idempotency key for this order (kept in race2Key so it can be replayed).",
+                  "pm.collectionVariables.set('race2Key', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "d25bc31c-c45a-56df-99e4-d4399fef317a",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('Location points to the order status resource', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/orders/' + body.orderId);",
+                  "    pm.expect(body.statusUrl).to.eql('/api/v1/orders/' + body.orderId);",
+                  "});",
+                  "pm.test('order is queued (tickets not held yet)', () => {",
+                  "    pm.expect(body.status).to.eql('AVAILABLE');",
+                  "    pm.expect(body.processingStatus).to.eql('QUEUED');",
+                  "});",
+                  "pm.collectionVariables.set('raceOrder2', body.orderId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "ecbd895f-6f93-534b-bfa3-84d3ee9d265d",
+          "name": "09.4 Poll customer-1 order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{raceOrder1}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{raceOrder1}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "886b95de-2bee-5211-be99-951d9997d269",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches RESERVED/ACTIVE|AVAILABLE/REJECTED (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'RESERVED/ACTIVE|AVAILABLE/REJECTED');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "7f50171f-d99e-5a48-b627-827e61daab37",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}",
+                  "",
+                  "if (reached) {",
+                  "    const order = pm.response.json();",
+                  "    pm.collectionVariables.set('raceState1', order.processingStatus + '/' + (order.reason || ''));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "0757be57-cccd-5822-bf16-1f5f53bf0628",
+          "name": "09.5 Poll customer-2 order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{raceOrder2}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{raceOrder2}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "beb1a354-dbe9-55d6-988a-9584a30c06bf",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches RESERVED/ACTIVE|AVAILABLE/REJECTED (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'RESERVED/ACTIVE|AVAILABLE/REJECTED');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "97f107f7-cb47-56c7-a289-7dc6b08b596c",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}",
+                  "",
+                  "if (reached) {",
+                  "    const order = pm.response.json();",
+                  "    pm.collectionVariables.set('raceState2', order.processingStatus + '/' + (order.reason || ''));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "83e3b2f5-bf82-5282-af80-01c7f1708f4e",
+          "name": "09.6 Exactly one winner, no oversell",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{soldOutEventId}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{soldOutEventId}}",
+                "availability"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "eb68d55c-1ad8-556b-bb7a-909450e1d4ea",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('counters add up to the capacity (no ticket lost or duplicated)', () => {",
+                  "    pm.expect(a.available + a.reserved + a.pendingConfirmation + a.sold + a.complimentary).to.eql(a.totalCapacity);",
+                  "});",
+                  "pm.test('no oversell: sold + held + complimentary <= capacity', () => {",
+                  "    pm.expect(a.sold + a.reserved + a.pendingConfirmation + a.complimentary).to.be.at.most(a.totalCapacity);",
+                  "});",
+                  "",
+                  "pm.test('one ACTIVE and one REJECTED with reason SOLD_OUT', () => {",
+                  "    const states = [pm.collectionVariables.get('raceState1'), pm.collectionVariables.get('raceState2')].sort();",
+                  "    pm.expect(states).to.eql(['ACTIVE/', 'REJECTED/SOLD_OUT']);",
+                  "});",
+                  "pm.test('1 reserved, 0 available', () => {",
+                  "    const a = pm.response.json();",
+                  "    pm.expect(a.reserved).to.eql(1);",
+                  "    pm.expect(a.available).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "52cfb1be-01c1-56a4-98ac-f0b6e8cd9241",
+          "name": "09.7 New order once sold out -> 409 at admission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{soldOutEventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{soldOutEventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer2Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "95d546c3-344f-5a32-b425-0b18bdbfcb54",
+                "type": "text/javascript",
+                "exec": [
+                  "// Let the 2 s event cache of the API expire so the admission check sees availableCount = 0.",
+                  "setTimeout(() => {}, 2100);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "91cf1360-50ec-56a7-a23c-c1897a468160",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 SOLD_OUT', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('SOLD_OUT');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "47244a97-b2f3-593a-ae48-07c9e42e6771",
+      "name": "10 Security",
+      "description": "401 without or with an invalid token, 403 with the wrong role, 429 above the per-customer token bucket.",
+      "item": [
+        {
+          "id": "05a4de40-f384-564b-8d55-635317a18135",
+          "name": "10.1 No token -> 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "8c9d98d9-0736-5a0a-8d4c-ffd67d37a163",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 UNAUTHORIZED', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('UNAUTHORIZED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "ebc9e519-c868-5b7c-aaaa-5110e07857f3",
+          "name": "10.2 Forged token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.Zm9yZ2Vk"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "cdb1f7d4-76e8-57de-b5fe-8cc32a655e2f",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 UNAUTHORIZED', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('UNAUTHORIZED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "77683654-9249-5ad9-924c-d5e470a7eb95",
+          "name": "10.3 CUSTOMER creates an event -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Not allowed\",\n  \"venue\": \"Arena Norte\",\n  \"eventDate\": \"{{eventDate}}\",\n  \"totalCapacity\": 1,\n  \"ticketPrice\": 75.50,\n  \"currency\": \"USD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "5e569a46-4ed1-54a0-ae03-2f4e7117c3e5",
+                "type": "text/javascript",
+                "exec": [
+                  "// Event dates must be in the future.",
+                  "pm.collectionVariables.set('eventDate', new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "aab52ab3-bd89-5f9a-abc7-b77590a37258",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 FORBIDDEN', () => {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('FORBIDDEN');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "875113a2-fce1-536e-b960-bffd464a5ee1",
+          "name": "10.4 Burst of 40 POSTs -> 429 + Retry-After",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer2Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "66e04881-aeb3-5042-b658-ec13f80ad129",
+                "type": "text/javascript",
+                "exec": [
+                  "// Fires 40 asynchronous POSTs as customer-2 (bucket: 20 tokens, refilled at 20 tokens/s) before this request",
+                  "// is sent. The sandbox spreads them over a few hundred ms, so some tokens refill during the burst.",
+                  "const codes = [];",
+                  "const total = 40;",
+                  "pm.collectionVariables.unset('burst429');",
+                  "for (let i = 0; i < total; i++) {",
+                  "    pm.sendRequest({",
+                  "        url: pm.variables.get('baseUrl') + '/api/v1/events/' + pm.collectionVariables.get('eventId') + '/orders',",
+                  "        method: 'POST',",
+                  "        header: { 'Authorization': 'Bearer ' + pm.collectionVariables.get('customer2Token'),",
+                  "                  'Content-Type': 'application/json' },",
+                  "        body: { mode: 'raw', raw: '{\"quantity\":1}' }",
+                  "    }, (error, response) => {",
+                  "        codes.push(error ? 0 : response.code);",
+                  "        if (!error && response.code === 429 && !pm.collectionVariables.get('burst429')) {",
+                  "            pm.collectionVariables.set('burst429', JSON.stringify({",
+                  "                errorCode: response.json().errorCode,",
+                  "                retryAfter: response.headers.get('Retry-After')",
+                  "            }));",
+                  "        }",
+                  "        if (codes.length === total) {",
+                  "            pm.collectionVariables.set('burstCodes', JSON.stringify(codes));",
+                  "        }",
+                  "    });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "6e3acc49-9bec-5458-904f-632d0a4bff1a",
+                "type": "text/javascript",
+                "exec": [
+                  "const codes = JSON.parse(pm.collectionVariables.get('burstCodes') || '[]');",
+                  "const limited = codes.filter((c) => c === 429).length;",
+                  "console.log('burst status codes (' + limited + ' x 429)', codes.join(','));",
+                  "pm.test('the bucket let the first calls through (400: no Idempotency-Key) and rejected the excess with 429', () => {",
+                  "    pm.expect(codes).to.have.length(40);",
+                  "    pm.expect(codes.every((c) => c === 400 || c === 429)).to.be.true;",
+                  "    pm.expect(codes.filter((c) => c === 400).length).to.be.at.least(20);",
+                  "    pm.expect(limited).to.be.at.least(1);",
+                  "});",
+                  "pm.test('429 is RATE_LIMIT_EXCEEDED with a Retry-After header', () => {",
+                  "    const rejected = JSON.parse(pm.collectionVariables.get('burst429') || '{}');",
+                  "    pm.expect(rejected.errorCode).to.eql('RATE_LIMIT_EXCEEDED');",
+                  "    pm.expect(Number(rejected.retryAfter)).to.be.at.least(1);",
+                  "});",
+                  "if (pm.response.code === 429) {",
+                  "    pm.test('this request was rate limited too', () => {",
+                  "        pm.expect(pm.response.json().errorCode).to.eql('RATE_LIMIT_EXCEEDED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "66aae026-af32-5122-9106-e4364a93f122",
+          "name": "10.5 After the refill the customer is served again",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer2Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "a2d395c6-58fa-57ef-b5cf-8ff684d225fc",
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "b2da3fe8-01da-512c-8e48-615833c4ef4a",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('not rate limited any more (400: no Idempotency-Key)', () => pm.response.to.have.status(400));",
+                  "pm.test('X-RateLimit-Remaining reported', () => pm.expect(pm.response.headers.has('X-RateLimit-Remaining')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bba54ee7-2059-53ab-8fb8-ad8f4e138e38",
+      "name": "11 Observability",
+      "description": "Prometheus metrics of the API. Worker metrics (sqs.messages, sweeper.*) are on the compose network only: see scripts/curl/flows.sh metrics. The availability SSE stream (GET .../availability/stream) never ends, so it is demonstrated with curl -N rather than in this collection.",
+      "item": [
+        {
+          "id": "4bc6110a-9fcd-56bb-826c-552ad12cda70",
+          "name": "11.1 Prometheus scrape (API)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/prometheus",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "prometheus"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "5879ce9c-9f78-5e67-99a3-dceee2013acc",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const text = pm.response.text();",
+                  "pm.test('http.server.requests recorded per route template', () => {",
+                  "    pm.expect(text).to.match(/http_server_requests_seconds_count\\{[^}]*uri=\"\\/api\\/v1\\/events\\/\\{eventId\\}\\/orders\"/);",
+                  "});",
+                  "pm.test('common tags application and runtime_mode', () => {",
+                  "    pm.expect(text).to.include('application=\"ms-ticket\"');",
+                  "    pm.expect(text).to.include('runtime_mode=\"api\"');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bb80a4ff-9fd9-5e81-8947-e4b1efda7c91",
+      "name": "12 Hold expiry (demo override)",
+      "description": "Self-describing: with the normal 10 min hold this folder only cancels its probe order. Run the stack with docker-compose.demo.yml (hold 30 s, sweeper every 5 s) to watch RESERVED -> EXPIRED and the 410 on a late confirmation.",
+      "item": [
+        {
+          "id": "d9bc0e84-01f7-55e5-aa35-762e458e62a4",
+          "name": "12.1 Place order (expiry probe)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{expiryKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "869eb708-779c-550e-823c-e983a03a4f02",
+                "type": "text/javascript",
+                "exec": [
+                  "// Fresh idempotency key for this order (kept in expiryKey so it can be replayed).",
+                  "pm.collectionVariables.set('expiryKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "6a48544d-62c3-584b-906d-d77813d641a7",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('Location points to the order status resource', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/orders/' + body.orderId);",
+                  "    pm.expect(body.statusUrl).to.eql('/api/v1/orders/' + body.orderId);",
+                  "});",
+                  "pm.test('order is queued (tickets not held yet)', () => {",
+                  "    pm.expect(body.status).to.eql('AVAILABLE');",
+                  "    pm.expect(body.processingStatus).to.eql('QUEUED');",
+                  "});",
+                  "pm.collectionVariables.set('expiryOrderId', body.orderId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "cab7a1ec-c09d-583d-ad8a-31f368332f43",
+          "name": "12.2 Poll until RESERVED (reads the hold TTL)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{expiryOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{expiryOrderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "b36351dc-1451-5fa5-b542-af9052a322b0",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches RESERVED/ACTIVE (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'RESERVED/ACTIVE');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "b0bfcec3-8057-5980-9bac-f94e8fae024e",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}",
+                  "",
+                  "if (reached) {",
+                  "    const order = pm.response.json();",
+                  "    const ttl = Math.round((new Date(order.holdExpiresAt).getTime() - new Date(order.updatedAt).getTime()) / 1000);",
+                  "    const demo = ttl <= 120;",
+                  "    pm.collectionVariables.set('holdTtlSeconds', ttl);",
+                  "    pm.collectionVariables.set('demoMode', String(demo));",
+                  "    if (!demo) {",
+                  "        pm.test('SKIPPED: hold TTL is ' + ttl + ' s (normal config). Start docker-compose.demo.yml (hold 30 s) to watch the expiry', () => {});",
+                  "        pm.execution.setNextRequest('12.5 Release the probe order');",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "1b8954b0-1817-547b-9b85-fe3212b2e17e",
+          "name": "12.3 Poll until EXPIRED (sweeper)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{expiryOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{expiryOrderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "37d3b54d-dca1-525c-b787-25295c105c55",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches AVAILABLE/EXPIRED (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'AVAILABLE/EXPIRED');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}",
+                  "",
+                  "// Allow the whole hold plus two sweeper intervals.",
+                  "const ttl = Number(pm.collectionVariables.get('holdTtlSeconds') || 30);",
+                  "pm.collectionVariables.set('pollMaxAttempts', Math.ceil((ttl + 30) * 1000 / Number(pm.environment.get('pollIntervalMs') || 500)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "0d9c20d6-3b54-571d-9c24-47e648fad7c3",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}",
+                  "",
+                  "if (reached) {",
+                  "    pm.test('released by the sweeper with reason HOLD_EXPIRED', () => {",
+                  "        pm.expect(pm.response.json().reason).to.eql('HOLD_EXPIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "bb64aeb5-f171-5a9a-b0de-b567f00e3d19",
+          "name": "12.4 Confirm after the hold expired -> 410",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{expiryOrderId}}/confirmation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{expiryOrderId}}",
+                "confirmation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"paymentToken\": \"tok_approved\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "b61493d2-fb8a-53de-ae49-4855f5d8b27c",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('410 HOLD_EXPIRED', () => {",
+                  "    pm.response.to.have.status(410);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql('HOLD_EXPIRED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "5a793466-f435-55dd-9dec-add8e6e1c83a",
+          "name": "12.5 Release the probe order",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{expiryOrderId}}/reservation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{expiryOrderId}}",
+                "reservation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "03349e6a-95dd-5f0b-a311-36162a58a7b6",
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('demoMode') === 'true') {",
+                  "    pm.test('already EXPIRED: cancelling is rejected with 409 INVALID_ORDER_STATE', () => pm.response.to.have.status(409));",
+                  "} else {",
+                  "    pm.test('normal config: probe order cancelled (202)', () => pm.response.to.have.status(202));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "f03c1649-997a-5543-a201-0e188abe07b7",
+      "name": "13 Payment gateway error (tok_error)",
+      "description": "tok_error makes the payment mock answer 500: the worker retries the charge twice, then SQS redelivers the message with exponential backoff (10 s, 20 s, 40 s, 80 s) and moves it to the DLQ after 5 receives. The order stays PENDING_CONFIRMATION until the reconciliation sweeper finds no charge after the confirmation timeout and releases it (EXPIRED / CONFIRMATION_TIMEOUT): 20 s with docker-compose.demo.yml, 5 min with the normal config (not awaited here).",
+      "item": [
+        {
+          "id": "1e95c38e-80f8-5359-b3e2-7cd71d720257",
+          "name": "13.1 Place order (1 ticket)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{errorKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/{{eventId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events",
+                "{{eventId}}",
+                "orders"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "9016d14c-7025-5c57-a9e5-d3a7090de384",
+                "type": "text/javascript",
+                "exec": [
+                  "// Fresh idempotency key for this order (kept in errorKey so it can be replayed).",
+                  "pm.collectionVariables.set('errorKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "011a1b8d-1441-546b-84d8-5885d90da472",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('Location points to the order status resource', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/orders/' + body.orderId);",
+                  "    pm.expect(body.statusUrl).to.eql('/api/v1/orders/' + body.orderId);",
+                  "});",
+                  "pm.test('order is queued (tickets not held yet)', () => {",
+                  "    pm.expect(body.status).to.eql('AVAILABLE');",
+                  "    pm.expect(body.processingStatus).to.eql('QUEUED');",
+                  "});",
+                  "pm.collectionVariables.set('errorOrderId', body.orderId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "47e6cccb-3ca3-5122-aabb-742d9b4805e6",
+          "name": "13.2 Poll until RESERVED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{errorOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{errorOrderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "8d64b651-bf59-5000-910a-b182c4ff333e",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches RESERVED/ACTIVE (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'RESERVED/ACTIVE');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "45e4035e-be7c-551e-a49a-4fca13d2e57a",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "0c699c86-7d01-54ef-8a40-804d21ab0ea6",
+          "name": "13.3 Confirm with tok_error -> 202",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{errorOrderId}}/confirmation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{errorOrderId}}",
+                "confirmation"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"paymentToken\": \"tok_error\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "0772d1e6-6d72-51f4-8f85-96449e889412",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 PENDING_CONFIRMATION', () => {",
+                  "    pm.response.to.have.status(202);",
+                  "    pm.expect(pm.response.json().status).to.eql('PENDING_CONFIRMATION');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "3013ea5d-939f-5b4c-bab2-2c4f7f8c2b0b",
+          "name": "13.4 Still PENDING_CONFIRMATION while the gateway fails",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{errorOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{errorOrderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "2d093a3b-ebe6-5cf8-985d-c29ac264553e",
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 3000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "7d8d1749-75c6-57d4-b8e4-94ba8b22bb7c",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('tickets stay PENDING_CONFIRMATION (never sold without a captured payment)', () => {",
+                  "    pm.expect(pm.response.json().status).to.eql('PENDING_CONFIRMATION');",
+                  "});",
+                  "if (pm.collectionVariables.get('demoMode') !== 'true') {",
+                  "    pm.test('SKIPPED: reconciliation happens after the 5 min confirmation timeout (normal config)', () => {});",
+                  "    pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "6188a177-38ba-595b-a035-0c7a3a286375",
+          "name": "13.5 Poll until reconciled (EXPIRED)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{errorOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{errorOrderId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer1Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "12d674eb-961d-5d20-81a7-7a7159376a8b",
+                "type": "text/javascript",
+                "exec": [
+                  "// Polls until the order reaches AVAILABLE/EXPIRED (state = \"<status>/<processingStatus>\").",
+                  "pm.collectionVariables.set('pollTarget', 'AVAILABLE/EXPIRED');",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "if (attempts > 0) {",
+                  "    setTimeout(() => {}, Number(pm.environment.get('pollIntervalMs') || 500));",
+                  "}",
+                  "",
+                  "pm.collectionVariables.set('pollMaxAttempts', Math.ceil(60000 / Number(pm.environment.get('pollIntervalMs') || 500)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "e747e0c3-2bff-5f1c-98c1-7990bde88722",
+                "type": "text/javascript",
+                "exec": [
+                  "// Async state: re-run this request (pm.execution.setNextRequest) until the target state or the attempt guard.",
+                  "const maxAttempts = Number(pm.collectionVariables.get('pollMaxAttempts') || pm.environment.get('maxPollAttempts') || 120);",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0) + 1;",
+                  "const order = pm.response.json();",
+                  "const state = order.status + '/' + order.processingStatus;",
+                  "const target = new RegExp('^(' + pm.collectionVariables.get('pollTarget') + ')$');",
+                  "const reached = target.test(state);",
+                  "if (!reached && attempts < maxAttempts) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts);",
+                  "    pm.execution.setNextRequest(pm.info.requestId);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "    pm.collectionVariables.unset('pollMaxAttempts');",
+                  "    pm.test(`order reached ${pm.collectionVariables.get('pollTarget')} (got ${state} after ${attempts} poll(s))`, () => {",
+                  "        pm.expect(state).to.match(target);",
+                  "    });",
+                  "}",
+                  "",
+                  "if (reached) {",
+                  "    pm.test('reason CONFIRMATION_TIMEOUT', () => pm.expect(pm.response.json().reason).to.eql('CONFIRMATION_TIMEOUT'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

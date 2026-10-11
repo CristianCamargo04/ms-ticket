@@ -1,0 +1,30 @@
+# -----------------------------------------------------------------------------
+# Compose override for live demos: time-based flows complete in seconds instead of minutes.
+#
+#   ticketing.orders.hold-ttl              10m -> 30s  (RESERVED -> EXPIRED by the sweeper)
+#   ticketing.orders.confirmation-timeout   5m -> 20s  (PENDING_CONFIRMATION -> payment reconciliation)
+#   ticketing.sweeper.interval             15s ->  5s  (expiry / reconciliation / dispatch sweepers)
+#
+# Both runtime modes need the values: the worker applies the hold TTL when it reserves and runs the
+# sweepers, the API sets the confirmation deadline when a customer confirms.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait ticketing-api ticketing-worker
+#   scripts/curl/flows.sh expiry payment-error        # or the Postman folders 12 and 13
+#   docker compose -f docker-compose.yml up -d --wait ticketing-api ticketing-worker    # back to normal
+#
+# Only the application containers are recreated: DynamoDB Local, LocalStack and the mocks keep their state.
+# The variable names are the Spring Boot relaxed-binding form of the properties (dashes removed).
+# -----------------------------------------------------------------------------
+x-demo-timings: &demo-timings
+  TICKETING_ORDERS_HOLDTTL: 30s
+  TICKETING_ORDERS_CONFIRMATIONTIMEOUT: 20s
+  TICKETING_SWEEPER_INTERVAL: 5s
+
+services:
+  ticketing-api:
+    environment:
+      <<: *demo-timings
+
+  ticketing-worker:
+    environment:
+      <<: *demo-timings
