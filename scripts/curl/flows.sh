@@ -246,7 +246,7 @@ flow_purchase() {
 
   wait_for_order "${ORDER_ID}" "${C1}" "RESERVED/ACTIVE"
   note "hold expires at $(json_get holdExpiresAt)"
-  SOLD_TICKET_ID="$(first_ticket_id)"
+  SOLD_TICKET_ID="$(first_ticket_id "${BODY}")"
   availability "${EVENT_ID}"
 
   http POST "/api/v1/orders/${ORDER_ID}/confirmation" "${C1}" '{"paymentToken":"tok_approved"}' -H "Idempotency-Key: $(new_key)"

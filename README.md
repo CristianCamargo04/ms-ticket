@@ -102,8 +102,8 @@ secuencia (compra, carreras, rechazo, sweeper, outbox, SSE) en [docs/architectur
 | k6 o Docker | prueba de carga (`grafana/k6`) | opcional |
 | Terraform ≥ 1.10 (o Docker) | validar la IaC | opcional, sin credenciales AWS |
 
-Puertos locales (solo en `127.0.0.1`): `8180` API en Docker (`8080` queda libre para la app desde el
-IDE), `8000` DynamoDB Local, `4566` LocalStack, `8089` pagos, `8090` auth, `8001` dynamodb-admin
+Puertos locales (solo en `127.0.0.1`): `8080` API en Docker (detén `ticketing-api` antes de correr la app
+desde el IDE en el mismo puerto), `8000` DynamoDB Local, `4566` LocalStack, `8089` pagos, `8090` auth, `8001` dynamodb-admin
 (opcional). Se cambian en `.env` (`*_HOST_PORT`).
 
 ## 4. Instalación y configuración
@@ -119,7 +119,7 @@ Variables de `.env` (ver `.env.example`):
 |---|---|---|
 | `LOCAL_AWS_REGION`, `LOCAL_AWS_ACCESS_KEY_ID`, `LOCAL_AWS_SECRET_ACCESS_KEY` | `us-east-1`, `test`, `test` | credenciales **dummy** de DynamoDB Local/LocalStack, inyectadas como `AWS_*` solo dentro de los contenedores (el prefijo `LOCAL_` evita reenviar credenciales reales exportadas en tu shell) |
 | `SQS_ORDER_RESERVATION_QUEUE`, `SQS_ORDER_PAYMENT_QUEUE` | `ticketing-order-reservation`, `ticketing-order-payment` | nombres de cola (cada una con `<cola>-dlq`) |
-| `API_HOST_PORT`, `AUTH_MOCK_HOST_PORT`, `PAYMENT_MOCK_HOST_PORT`, `DYNAMODB_HOST_PORT`, `LOCALSTACK_HOST_PORT`, `DYNAMODB_ADMIN_HOST_PORT` | 8180, 8090, 8089, 8000, 4566, 8001 | puertos del host |
+| `API_HOST_PORT`, `AUTH_MOCK_HOST_PORT`, `PAYMENT_MOCK_HOST_PORT`, `DYNAMODB_HOST_PORT`, `LOCALSTACK_HOST_PORT`, `DYNAMODB_ADMIN_HOST_PORT` | 8080, 8090, 8089, 8000, 4566, 8001 | puertos del host |
 
 Configuración de la aplicación: `src/main/resources/application.yml` (valores comunes) y perfiles
 `application-{local,ci,dev,prod}.yml`. Propiedades principales (todas sobreescribibles por variables
@@ -155,14 +155,14 @@ scripts/infra/verify-infra.sh           # smoke test: colas + DLQ, tablas, escen
 | `localstack` | `localstack/localstack:4.9` | SQS: 2 colas + 2 DLQ creadas por `src/main/resources/scripts/localstack/init-sqs.sh` |
 | `payment-mock` | `wiremock/wiremock:3.13.2` | pasarela: `tok_approved*`, `tok_declined*`, `tok_slow*` (5 s), `tok_error*` (500) |
 | `auth-mock` | `ghcr.io/navikt/mock-oauth2-server:6.0.5` | emisor JWT + JWKS (clientes `customer-1`, `customer-2`, `admin`) |
-| `ticketing-api` | `ms-ticket:local` | `TICKETING_RUNTIMEMODE=API`, puerto 8180 en el host, aplica las migraciones DynamoDB |
+| `ticketing-api` | `ms-ticket:local` | `TICKETING_RUNTIMEMODE=API`, puerto 8080 en el host, aplica las migraciones DynamoDB |
 | `ticketing-worker` | `ms-ticket:local` | `TICKETING_RUNTIMEMODE=WORKER`, consumidores + sweepers, sin puertos publicados |
 
 Verificación de salud:
 
 ```bash
-curl -s http://localhost:8180/actuator/health/readiness     # {"status":"UP"}
-curl -s http://localhost:8180/actuator/prometheus | head    # métricas
+curl -s http://localhost:8080/actuator/health/readiness     # {"status":"UP"}
+curl -s http://localhost:8080/actuator/prometheus | head    # métricas
 docker compose logs -f ticketing-worker                     # reservas, pagos y sweepers
 ```
 
