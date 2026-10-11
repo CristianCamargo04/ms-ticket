@@ -67,7 +67,7 @@ testing {
         register<JvmTestSuite>("integrationTest") {
             useJUnitJupiter()
             dependencies {
-                implementation(project())
+                implementation(sourceSets.main.get().output)
                 implementation(platform(libs.spring.boot.bom))
                 implementation(platform(libs.aws.sdk.bom))
                 implementation(platform(libs.testcontainers.bom))
