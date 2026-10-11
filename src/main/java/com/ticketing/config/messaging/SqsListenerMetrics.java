@@ -47,7 +47,10 @@ public class SqsListenerMetrics {
         ACKED,
         /** The handler failed (or the deletion failed): the message will be redelivered. */
         FAILED,
-        /** The handler failed on the last delivery allowed by the redrive policy: the message is dead-lettered. */
+        /**
+         * The handler failed on the last delivery allowed by the redrive policy: after the redelivery backoff, SQS
+         * moves the message to the dead-letter queue on its next receive.
+         */
         POISON;
 
         /**

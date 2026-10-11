@@ -23,7 +23,8 @@ import software.amazon.awssdk.services.sqs.SqsAsyncClient;
  *
  * <p>The channels are injected through their presentation interfaces: {@code order-reservation} →
  * {@link OrderReservationSqsController}, {@code order-payment} → {@link OrderPaymentSqsController}. Queue names come
- * from {@code aws.sqs.*}; the drain budget of the container is {@code spring.lifecycle.timeout-per-shutdown-phase}.
+ * from {@code aws.sqs.*}; the drain budget of the container is 90 % of
+ * {@code spring.lifecycle.timeout-per-shutdown-phase}, the phase it shares with the web server's graceful shutdown.
  */
 @Configuration(proxyBeanMethods = false)
 @Conditional(WorkerModeCondition.class)
@@ -62,18 +63,19 @@ public class SqsListenerConfig {
     }
 
     /**
-     * Container settings from {@code ticketing.messaging.*} and the lifecycle shutdown timeout.
+     * Container settings from {@code ticketing.messaging.*} and the lifecycle phase timeout (the container drains
+     * within 90 % of it, see {@link SqsListenerSettings#from}).
      *
      * @param properties  application settings
-     * @param environment the environment (shutdown timeout)
+     * @param environment the environment (shutdown phase timeout)
      * @return the settings
      */
     @Bean
     public SqsListenerSettings sqsListenerSettings(TicketingProperties properties, Environment environment) {
-        Duration shutdownTimeout = Binder.get(environment)
+        Duration phaseTimeout = Binder.get(environment)
                 .bind(SHUTDOWN_TIMEOUT_PROPERTY, Duration.class)
                 .orElse(DEFAULT_SHUTDOWN_TIMEOUT);
-        return SqsListenerSettings.from(properties.messaging(), shutdownTimeout);
+        return SqsListenerSettings.from(properties.messaging(), phaseTimeout);
     }
 
     /**

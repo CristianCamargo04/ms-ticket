@@ -90,24 +90,24 @@ class SqsListenerConfigTest {
     }
 
     @Test
-    void shouldBuildSettingsFromMessagingPropertiesAndTheShutdownTimeout() {
+    void shouldBuildSettingsFromMessagingPropertiesAndDrainWithinNinetyPercentOfThePhaseTimeout() {
         runner.withPropertyValues("ticketing.messaging.pollers=3", "ticketing.messaging.concurrency=8",
                         "aws.sqs.order-payment-queue=payments", "spring.lifecycle.timeout-per-shutdown-phase=45s")
                 .run(context -> {
                     SqsListenerSettings settings = context.getBean(SqsListenerSettings.class);
                     assertThat(settings.pollers()).isEqualTo(3);
                     assertThat(settings.concurrency()).isEqualTo(8);
-                    assertThat(settings.shutdownTimeout()).isEqualTo(Duration.ofSeconds(45));
+                    assertThat(settings.shutdownTimeout()).isEqualTo(Duration.ofMillis(40_500));
                     assertThat(context.getBean("orderPaymentQueueListener", SqsQueueListener.class).queueName())
                             .isEqualTo("payments");
                 });
     }
 
     @Test
-    void shouldDefaultTheShutdownTimeoutToThirtySeconds() {
+    void shouldDefaultThePhaseTimeoutToThirtySeconds() {
+        assertThat(SqsListenerConfig.DEFAULT_SHUTDOWN_TIMEOUT).isEqualTo(Duration.ofSeconds(30));
         runner.run(context -> assertThat(context.getBean(SqsListenerSettings.class).shutdownTimeout())
-                .isEqualTo(SqsListenerConfig.DEFAULT_SHUTDOWN_TIMEOUT)
-                .isEqualTo(Duration.ofSeconds(30)));
+                .isEqualTo(Duration.ofSeconds(27)));
     }
 
     @Test

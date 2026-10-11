@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -28,7 +29,8 @@ import software.amazon.awssdk.services.sqs.model.Message;
 
 /**
  * Runs the {@link SqsListenerContainer} against a real SQS API (LocalStack 4.9): acknowledgement, redelivery with
- * an increasing receive count, dead-lettering through the redrive policy, and graceful shutdown.
+ * an exponential visibility backoff and an increasing receive count, dead-lettering through the redrive policy, and
+ * graceful shutdown.
  */
 @Testcontainers
 class SqsListenerContainerIT {
@@ -37,7 +39,10 @@ class SqsListenerContainerIT {
     private static final int VISIBILITY_TIMEOUT_SECONDS = 5;
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
-    /** Short polls and backoffs: a failed message becomes visible again after 2^1 x 1s = 2s. */
+    /** Allowance for the timer granularity of LocalStack when asserting the redelivery delays. */
+    private static final Duration TIMING_TOLERANCE = Duration.ofMillis(500);
+
+    /** Short polls and backoffs: a failed message becomes visible again after 2^n x 1s (2s, then 4s). */
     private static final SqsListenerSettings SETTINGS = new SqsListenerSettings(10, 1, VISIBILITY_TIMEOUT_SECONDS, 4,
             2, Duration.ofSeconds(1), Duration.ofSeconds(4), Duration.ofMillis(200), Duration.ofSeconds(1),
             Duration.ofSeconds(10));
@@ -95,9 +100,11 @@ class SqsListenerContainerIT {
     }
 
     @Test
-    void shouldRedeliverAFailingMessageWithAnIncreasingReceiveCountAndThenDeadLetterIt() {
+    void shouldRedeliverAFailingMessageWithBackoffAndAnIncreasingReceiveCountAndThenDeadLetterIt() {
         List<Integer> receiveCounts = new CopyOnWriteArrayList<>();
+        List<Long> deliveredAt = new CopyOnWriteArrayList<>();
         start(body -> Mono.deferContextual(context -> {
+            deliveredAt.add(System.nanoTime());
             receiveCounts.add(context.get(SqsListenerContainer.RECEIVE_COUNT_KEY));
             return Mono.error(new IllegalStateException("payment gateway down"));
         }));
@@ -105,12 +112,20 @@ class SqsListenerContainerIT {
         LocalStackSqsSupport.send(sqs, queue.url(), "poison-pill", "corr-it-2");
 
         List<Message> deadLettered = new CopyOnWriteArrayList<>();
+        AtomicLong deadLetteredAt = new AtomicLong();
         await().atMost(TIMEOUT).until(() -> {
             deadLettered.addAll(LocalStackSqsSupport.receive(sqs, queue.dlqUrl()));
+            deadLetteredAt.set(System.nanoTime());
             return !deadLettered.isEmpty();
         });
         assertThat(deadLettered).extracting(Message::body).containsExactly("poison-pill");
         assertThat(receiveCounts).containsExactly(1, 2);
+        // SQS honours the exponential ChangeMessageVisibility: the second delivery comes redeliveryDelay(1) after the
+        // first, and the last allowed delivery keeps its backoff too (redeliveryDelay(2)) before the move to the DLQ
+        assertThat(Duration.ofNanos(deliveredAt.get(1) - deliveredAt.get(0)))
+                .isGreaterThanOrEqualTo(SETTINGS.redeliveryDelay(1).minus(TIMING_TOLERANCE));
+        assertThat(Duration.ofNanos(deadLetteredAt.get() - deliveredAt.get(1)))
+                .isGreaterThanOrEqualTo(SETTINGS.redeliveryDelay(2).minus(TIMING_TOLERANCE));
         assertThat(outcomes(MessageOutcome.FAILED)).isEqualTo(1.0);
         assertThat(outcomes(MessageOutcome.POISON)).isEqualTo(1.0);
         assertThat(outcomes(MessageOutcome.ACKED)).isZero();

@@ -33,7 +33,7 @@ import reactor.core.scheduler.Scheduler;
  */
 public final class MaintenanceTimer implements SmartLifecycle {
 
-    /** Lifecycle phase, shared with the SQS listener container: started last, stopped first. */
+    /** Lifecycle phase: started after the web server, stopped (immediately) before its graceful shutdown. */
     public static final int PHASE = SmartLifecycle.DEFAULT_PHASE - 512;
 
     /** Counter of sweeper runs. */

@@ -7,13 +7,16 @@ import java.util.Objects;
 /**
  * Runtime settings of the {@link SqsListenerContainer}.
  *
- * <p>Long polling is mandatory ({@code waitTimeSeconds >= 1}): with a zero wait time an idle queue would turn every
- * poller into a hot loop of empty {@code ReceiveMessage} calls.
+ * <p>{@code waitTimeSeconds} accepts the whole range documented for {@code ticketing.messaging.wait-time-seconds}
+ * ({@code 0..20}). Long polling ({@code >= 1}) is strongly recommended; with short polling ({@code 0}) the container
+ * pauses {@link SqsListenerContainer#SHORT_POLLING_IDLE_DELAY} after every empty receive, so an idle queue never turns
+ * a poller into a hot loop of empty {@code ReceiveMessage} calls.
  *
  * @param maxMessages              messages per {@code ReceiveMessage} call (1..10)
- * @param waitTimeSeconds          long polling wait (1..20)
+ * @param waitTimeSeconds          long polling wait (0..20, 0 = short polling)
  * @param visibilityTimeoutSeconds visibility timeout requested for received messages (1..43200); must exceed the
- *                                 longest expected processing time
+ *                                 longest expected processing time, a handler is cancelled after
+ *                                 {@link #handlerTimeout()}
  * @param concurrency              messages processed in parallel per queue, {@code >= 1}
  * @param pollers                  concurrent receive loops per queue, {@code >= 1}
  * @param redeliveryBaseDelay      base of the exponential redelivery backoff applied to a failed message
@@ -52,6 +55,9 @@ public record SqsListenerSettings(
     /** Largest exponent of the backoff; any larger receive count already saturates every sensible maximum. */
     private static final int MAX_BACKOFF_EXPONENT = 30;
 
+    /** Share of a bound kept in reserve: the handler and drain timeouts use 90 % of their bound. */
+    private static final int RESERVE_DIVISOR = 10;
+
     /**
      * Validates the settings.
      *
@@ -60,7 +66,7 @@ public record SqsListenerSettings(
      */
     public SqsListenerSettings {
         requireBetween(maxMessages, 1, 10, "maxMessages");
-        requireBetween(waitTimeSeconds, 1, 20, "waitTimeSeconds");
+        requireBetween(waitTimeSeconds, 0, 20, "waitTimeSeconds");
         requireBetween(visibilityTimeoutSeconds, 1, (int) MAX_VISIBILITY_TIMEOUT.toSeconds(), "visibilityTimeoutSeconds");
         requireBetween(concurrency, 1, Integer.MAX_VALUE, "concurrency");
         requireBetween(pollers, 1, Integer.MAX_VALUE, "pollers");
@@ -81,16 +87,45 @@ public record SqsListenerSettings(
     /**
      * Builds the settings from {@code ticketing.messaging.*} with the default backoffs.
      *
-     * @param messaging       the messaging properties
-     * @param shutdownTimeout drain budget ({@code spring.lifecycle.timeout-per-shutdown-phase})
+     * <p>The drain budget is {@link #drainBudget(Duration) 90 %} of the lifecycle phase timeout: Spring waits at most
+     * the phase timeout for the container, so the forced cancellation of the handlers still running after the budget
+     * has to complete inside that window.
+     *
+     * @param messaging    the messaging properties
+     * @param phaseTimeout graceful shutdown budget of the lifecycle phase
+     *                     ({@code spring.lifecycle.timeout-per-shutdown-phase})
      * @return the settings
      */
-    public static SqsListenerSettings from(TicketingProperties.Messaging messaging, Duration shutdownTimeout) {
+    public static SqsListenerSettings from(TicketingProperties.Messaging messaging, Duration phaseTimeout) {
         Objects.requireNonNull(messaging, "messaging");
         return new SqsListenerSettings(messaging.maxMessages(), messaging.waitTimeSeconds(),
                 messaging.visibilityTimeoutSeconds(), messaging.concurrency(), messaging.pollers(),
                 DEFAULT_REDELIVERY_BASE_DELAY, DEFAULT_REDELIVERY_MAX_DELAY,
-                DEFAULT_POLL_RETRY_MIN_BACKOFF, DEFAULT_POLL_RETRY_MAX_BACKOFF, shutdownTimeout);
+                DEFAULT_POLL_RETRY_MIN_BACKOFF, DEFAULT_POLL_RETRY_MAX_BACKOFF, drainBudget(phaseTimeout));
+    }
+
+    /**
+     * Time the container may spend draining within a lifecycle phase: 90 % of the phase timeout, the rest being kept
+     * for the forced cancellation and the stop callback.
+     *
+     * @param phaseTimeout the lifecycle phase timeout
+     * @return the drain budget
+     */
+    static Duration drainBudget(Duration phaseTimeout) {
+        Objects.requireNonNull(phaseTimeout, "phaseTimeout");
+        return phaseTimeout.minus(phaseTimeout.dividedBy(RESERVE_DIVISOR));
+    }
+
+    /**
+     * Maximum processing time of one message: 90 % of the visibility timeout. A handler still running then is
+     * cancelled and the message is rejected (redelivery backoff), which frees its worker slot before SQS makes the
+     * message visible to another consumer.
+     *
+     * @return the handler timeout
+     */
+    public Duration handlerTimeout() {
+        Duration visibilityTimeout = Duration.ofSeconds(visibilityTimeoutSeconds);
+        return visibilityTimeout.minus(visibilityTimeout.dividedBy(RESERVE_DIVISOR));
     }
 
     /**

@@ -28,10 +28,11 @@ class SqsListenerSettingsTest {
 
         SqsListenerSettings settings = SqsListenerSettings.from(messaging, Duration.ofSeconds(45));
 
+        // the container drains within 90 % of the lifecycle phase timeout
         assertThat(settings).isEqualTo(new SqsListenerSettings(10, 20, 60, 16, 2,
                 SqsListenerSettings.DEFAULT_REDELIVERY_BASE_DELAY, SqsListenerSettings.DEFAULT_REDELIVERY_MAX_DELAY,
                 SqsListenerSettings.DEFAULT_POLL_RETRY_MIN_BACKOFF, SqsListenerSettings.DEFAULT_POLL_RETRY_MAX_BACKOFF,
-                Duration.ofSeconds(45)));
+                Duration.ofMillis(40_500)));
         assertThat(SqsListenerSettings.DEFAULT_REDELIVERY_BASE_DELAY).isEqualTo(Duration.ofSeconds(5));
         assertThat(SqsListenerSettings.DEFAULT_REDELIVERY_MAX_DELAY).isEqualTo(Duration.ofSeconds(300));
         assertThatNullPointerException().isThrownBy(() -> SqsListenerSettings.from(null, THIRTY_SECONDS));
@@ -52,12 +53,38 @@ class SqsListenerSettingsTest {
     }
 
     @Test
+    void shouldAcceptShortPollingAsDocumentedForTheWaitTimeProperty() {
+        SqsListenerSettings settings = new SqsListenerSettings(10, 0, 60, 16, 2, SECOND, SECOND, SECOND, SECOND,
+                SECOND);
+
+        assertThat(settings.waitTimeSeconds()).isZero();
+    }
+
+    @ParameterizedTest(name = "visibility timeout {0}s -> handler timeout {1}ms")
+    @CsvSource({"1, 900", "5, 4500", "60, 54000", "43200, 38880000"})
+    void shouldBoundHandlersToNinetyPercentOfTheVisibilityTimeout(int visibilityTimeoutSeconds,
+                                                                 long expectedMillis) {
+        SqsListenerSettings settings = new SqsListenerSettings(10, 20, visibilityTimeoutSeconds, 16, 2, SECOND,
+                SECOND, SECOND, SECOND, SECOND);
+
+        assertThat(settings.handlerTimeout()).isEqualTo(Duration.ofMillis(expectedMillis));
+    }
+
+    @Test
+    void shouldKeepTenPercentOfThePhaseTimeoutInReserveForTheForcedStop() {
+        assertThat(SqsListenerSettings.drainBudget(THIRTY_SECONDS)).isEqualTo(Duration.ofSeconds(27));
+        assertThat(SqsListenerSettings.drainBudget(Duration.ofNanos(1))).isEqualTo(Duration.ofNanos(1));
+        assertThatNullPointerException().isThrownBy(() -> SqsListenerSettings.drainBudget(null))
+                .withMessage("phaseTimeout");
+    }
+
+    @Test
     void shouldRejectOutOfRangeCounts() {
         assertThatIllegalArgumentException().isThrownBy(() -> new SqsListenerSettings(0, 20, 60, 16, 2,
                 SECOND, SECOND, SECOND, SECOND, SECOND)).withMessageContaining("maxMessages");
         assertThatIllegalArgumentException().isThrownBy(() -> new SqsListenerSettings(11, 20, 60, 16, 2,
                 SECOND, SECOND, SECOND, SECOND, SECOND)).withMessageContaining("maxMessages");
-        assertThatIllegalArgumentException().isThrownBy(() -> new SqsListenerSettings(10, 0, 60, 16, 2,
+        assertThatIllegalArgumentException().isThrownBy(() -> new SqsListenerSettings(10, -1, 60, 16, 2,
                 SECOND, SECOND, SECOND, SECOND, SECOND)).withMessageContaining("waitTimeSeconds");
         assertThatIllegalArgumentException().isThrownBy(() -> new SqsListenerSettings(10, 21, 60, 16, 2,
                 SECOND, SECOND, SECOND, SECOND, SECOND)).withMessageContaining("waitTimeSeconds");

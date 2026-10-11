@@ -41,6 +41,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.SmartLifecycle;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -214,23 +215,67 @@ class SqsListenerContainerTest {
     }
 
     @Test
-    void shouldMoveMessageToDeadLetterQueueOnLastAllowedDelivery() {
+    void shouldKeepTheRedeliveryBackoffOnTheLastAllowedDeliveryAndCountItAsPoison() {
         givenQueue(REDRIVE_POLICY);
-        givenPolls(batch(message("m1", 2), message("m2", 3)));
+        // m3 exceeds the startup maxReceiveCount (e.g. the redrive policy was raised or removed meanwhile)
+        givenPolls(batch(message("m1", 2), message("m2", 3), message("m3", 7)));
         givenVisibilityChangeSucceeds();
 
         start(container(body -> Mono.error(new IllegalStateException("boom"))));
 
         ArgumentCaptor<ChangeMessageVisibilityRequest> changes =
                 ArgumentCaptor.forClass(ChangeMessageVisibilityRequest.class);
-        verify(sqs, times(2)).changeMessageVisibility(changes.capture());
+        verify(sqs, times(3)).changeMessageVisibility(changes.capture());
         assertThat(changes.getAllValues()).extracting(ChangeMessageVisibilityRequest::visibilityTimeout)
-                .containsExactly(20, 0);
+                .containsExactly(20, 40, 300);
         assertThat(messages(MessageOutcome.FAILED)).isEqualTo(1.0);
-        assertThat(messages(MessageOutcome.POISON)).isEqualTo(1.0);
-        assertThat(logs.list).filteredOn(event -> event.getLevel() == Level.ERROR).singleElement()
+        assertThat(messages(MessageOutcome.POISON)).isEqualTo(2.0);
+        assertThat(logs.list).filteredOn(event -> event.getLevel() == Level.ERROR)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("Message m2 of SQS queue orders failed on its last delivery allowed by the redrive "
+                                + "policy (3 of 3): SQS moves it to the dead-letter queue on its next receive, in PT40S",
+                        "Message m3 of SQS queue orders failed on its last delivery allowed by the redrive "
+                                + "policy (7 of 3): SQS moves it to the dead-letter queue on its next receive, in PT5M");
+    }
+
+    @Test
+    void shouldTimeOutAHungHandlerRejectItsMessageAndReleaseItsWorkerSlot() {
+        givenQueue(REDRIVE_POLICY);
+        givenPolls(batch(message("m1", 1), message("m2", 1)));
+        givenVisibilityChangeSucceeds();
+        givenDeleteSucceeds();
+        AtomicBoolean cancelled = new AtomicBoolean();
+        List<String> completed = new CopyOnWriteArrayList<>();
+        SqsListenerSettings settings = settings(1, 1, Duration.ofSeconds(30), SHUTDOWN_TIMEOUT);
+        Duration handlerTimeout = settings.handlerTimeout();
+
+        start(container(settings, body -> body.equals("body-m1")
+                ? Mono.<Void>never().doOnCancel(() -> cancelled.set(true))
+                : Mono.fromRunnable(() -> completed.add(body))));
+        scheduler.advanceTimeBy(handlerTimeout.minusMillis(1));
+
+        assertThat(handlerTimeout).isEqualTo(Duration.ofSeconds(54));
+        assertThat(completed).isEmpty();
+        assertThat(registry.get(SqsListenerMetrics.IN_FLIGHT).gauge().value()).isEqualTo(1.0);
+        verify(sqs, never()).changeMessageVisibility(any(ChangeMessageVisibilityRequest.class));
+
+        scheduler.advanceTimeBy(Duration.ofMillis(1));
+
+        assertThat(cancelled).isTrue();
+        ArgumentCaptor<ChangeMessageVisibilityRequest> change =
+                ArgumentCaptor.forClass(ChangeMessageVisibilityRequest.class);
+        verify(sqs).changeMessageVisibility(change.capture());
+        assertThat(change.getValue().receiptHandle()).isEqualTo("receipt-m1");
+        assertThat(change.getValue().visibilityTimeout()).isEqualTo(10);
+        assertThat(completed).containsExactly("body-m2");
+        verify(sqs).deleteMessage(any(DeleteMessageRequest.class));
+        assertThat(messages(MessageOutcome.FAILED)).isEqualTo(1.0);
+        assertThat(messages(MessageOutcome.ACKED)).isEqualTo(1.0);
+        assertThat(registry.get(SqsListenerMetrics.IN_FLIGHT).gauge().value()).isZero();
+        assertThat(logs.list).filteredOn(event -> event.getLevel() == Level.WARN).singleElement()
                 .satisfies(event -> assertThat(event.getFormattedMessage())
-                        .contains("Message m2 of SQS queue orders failed on its last delivery (3 of 3)"));
+                        .contains("Message m1 of SQS queue orders failed on delivery 1; redelivery in PT10S")
+                        .contains("handler did not complete within PT54S"));
     }
 
     @Test
@@ -340,6 +385,82 @@ class SqsListenerContainerTest {
                 .hasSize(4)
                 .allSatisfy(message -> assertThat(message).contains("connection refused"))
                 .last().asString().contains("29 warning(s) suppressed");
+    }
+
+    @Test
+    void shouldRateLimitWarningsWhenFailuresAlternateWithSuccesses() {
+        givenQueue(REDRIVE_POLICY);
+        List<CompletableFuture<ReceiveMessageResponse>> flakyPolls = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            flakyPolls.add(failure(SdkClientException.create("throttled")));
+            flakyPolls.add(batch());
+        }
+        scriptedPolls.addAll(flakyPolls);
+        givenPolls();
+
+        start(container(body -> Mono.empty()));
+        // each failure is retried after 1 to 1.5 s, so the 20 failures all happen within the first 30 s
+        scheduler.advanceTimeBy(Duration.ofSeconds(60));
+
+        verify(sqs, times(41)).receiveMessage(any(ReceiveMessageRequest.class));
+        assertThat(logs.list).filteredOn(event -> event.getLevel() == Level.WARN).singleElement()
+                .satisfies(event -> assertThat(event.getFormattedMessage())
+                        .contains("Cannot receive messages from SQS queue orders (1 consecutive failure(s)"));
+        assertThat(logs.list).filteredOn(event -> event.getLevel() == Level.INFO)
+                .filteredOn(event -> event.getFormattedMessage().contains("again after"))
+                .singleElement()
+                .satisfies(event -> assertThat(event.getFormattedMessage())
+                        .isEqualTo("Can receive messages from SQS queue orders again after 1 failure(s)"));
+        assertThat(logs.list).filteredOn(event -> event.getLevel() == Level.DEBUG)
+                .filteredOn(event -> event.getFormattedMessage().startsWith("Cannot receive messages"))
+                .hasSize(19);
+    }
+
+    @Test
+    void shouldPauseAfterAnEmptyReceiveWhenShortPolling() {
+        givenQueue(REDRIVE_POLICY);
+        givenPolls(batch(), batch(), batch(message("m1", 1)));
+        givenDeleteSucceeds();
+        List<String> bodies = new CopyOnWriteArrayList<>();
+
+        start(container(shortPolling(), body -> Mono.fromRunnable(() -> bodies.add(body))));
+        scheduler.advanceTimeBy(SqsListenerContainer.SHORT_POLLING_IDLE_DELAY.minusMillis(1));
+        verify(sqs, times(1)).receiveMessage(any(ReceiveMessageRequest.class));
+        scheduler.advanceTimeBy(Duration.ofMillis(1));
+        verify(sqs, times(2)).receiveMessage(any(ReceiveMessageRequest.class));
+        scheduler.advanceTimeBy(SqsListenerContainer.SHORT_POLLING_IDLE_DELAY);
+
+        assertThat(bodies).containsExactly("body-m1");
+        // a non-empty receive is followed by the next poll right away
+        ArgumentCaptor<ReceiveMessageRequest> receive = ArgumentCaptor.forClass(ReceiveMessageRequest.class);
+        verify(sqs, times(4)).receiveMessage(receive.capture());
+        assertThat(receive.getValue().waitTimeSeconds()).isZero();
+    }
+
+    @Test
+    void shouldPollAgainRightAfterAnEmptyLongPoll() {
+        givenQueue(REDRIVE_POLICY);
+        givenPolls(batch(), batch());
+
+        start(container(body -> Mono.empty()));
+
+        verify(sqs, times(3)).receiveMessage(any(ReceiveMessageRequest.class));
+    }
+
+    @Test
+    void shouldCancelTheShortPollingPauseWhenStopping() {
+        givenQueue(REDRIVE_POLICY);
+        givenPolls(batch());
+        AtomicBoolean stopped = new AtomicBoolean();
+        SqsListenerContainer container = container(shortPolling(), body -> Mono.empty());
+        start(container);
+
+        container.stop(() -> stopped.set(true));
+        scheduler.advanceTimeBy(Duration.ofMinutes(1));
+
+        assertThat(stopped).isTrue();
+        assertThat(container.isRunning()).isFalse();
+        verify(sqs, times(1)).receiveMessage(any(ReceiveMessageRequest.class));
     }
 
     @Test
@@ -637,11 +758,13 @@ class SqsListenerContainerTest {
     }
 
     @Test
-    void shouldStartLateAndStopEarlyInTheLifecycle() {
+    void shouldStartAfterTheWebServerAndDrainTogetherWithItsGracefulShutdown() {
         SqsListenerContainer container = container(body -> Mono.empty());
 
         assertThat(container.getPhase()).isEqualTo(SqsListenerContainer.PHASE)
-                .isGreaterThan(SmartLifecycle.DEFAULT_PHASE - 1024);
+                .isEqualTo(WebServerApplicationContext.GRACEFUL_SHUTDOWN_PHASE)
+                .isGreaterThan(WebServerApplicationContext.START_STOP_LIFECYCLE_PHASE)
+                .isLessThan(SmartLifecycle.DEFAULT_PHASE);
         assertThat(container.isAutoStartup()).isTrue();
         assertThat(container.isRunning()).isFalse();
     }
@@ -668,6 +791,11 @@ class SqsListenerContainerTest {
                                                 Duration shutdownTimeout) {
         return new SqsListenerSettings(10, 20, 60, concurrency, pollers, Duration.ofSeconds(5), Duration.ofMinutes(5),
                 Duration.ofSeconds(1), pollRetryMaxBackoff, shutdownTimeout);
+    }
+
+    private static SqsListenerSettings shortPolling() {
+        return new SqsListenerSettings(10, 0, 60, 4, 1, Duration.ofSeconds(5), Duration.ofMinutes(5),
+                Duration.ofSeconds(1), Duration.ofSeconds(30), SHUTDOWN_TIMEOUT);
     }
 
     private SqsListenerContainer container(Function<String, Mono<Void>> handler) {
