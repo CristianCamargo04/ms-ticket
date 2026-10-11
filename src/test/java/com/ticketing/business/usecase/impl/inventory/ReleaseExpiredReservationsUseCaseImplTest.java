@@ -52,7 +52,6 @@ import reactor.test.publisher.PublisherProbe;
 
 @ExtendWith(MockitoExtension.class)
 class ReleaseExpiredReservationsUseCaseImplTest {
-
     private static final String LOCK = ReleaseExpiredReservationsUseCaseImpl.LOCK_NAME;
     private static final String OWNER = SWEEPER_POLICY.instanceId();
 

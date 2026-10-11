@@ -18,13 +18,7 @@ import com.tngtech.archunit.lang.SimpleConditionEvent;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/**
- * Enforces the interface / implementation layout of implementation spec section 1 (rules 1 and 2):
- * contracts live in the parent package and their implementations in an {@code impl} sub-package with the
- * {@code Impl} suffix.
- */
 class ImplPlacementRulesTest {
-
     @Test
     void interfacesShouldNotResideInImplPackages() {
         noClasses().that().areInterfaces().and().areNotAnnotations()

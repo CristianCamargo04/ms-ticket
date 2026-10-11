@@ -12,21 +12,7 @@ import reactor.netty.http.server.HttpServer;
 import reactor.netty.http.server.HttpServerRequest;
 import reactor.netty.http.server.HttpServerResponse;
 
-/**
- * A tiny in-process payment gateway (Reactor Netty) with the contract of {@code docker/wiremock}, plus the JWK set of
- * the {@link TestJwtIssuer}.
- *
- * <ul>
- *   <li>{@code POST /v1/charges}: {@code 201} {@code APPROVED} for a {@code paymentToken} starting with
- *       {@value #APPROVED_PREFIX}, {@code DECLINED / INSUFFICIENT_FUNDS} otherwise; {@code 400} without an
- *       {@code Idempotency-Key}. Every charge is recorded (idempotency key, {@code Authorization} header, token).</li>
- *   <li>{@code GET /v1/charges/{key}}: {@code 404} (no charge state, like the WireMock mock).</li>
- *   <li>{@code GET /jwks}: the issuer's public keys.</li>
- * </ul>
- */
 public final class PaymentGatewayStub implements AutoCloseable {
-
-    /** Payment tokens starting with this prefix are approved. */
     public static final String APPROVED_PREFIX = "tok_approved";
 
     private static final Pattern PAYMENT_TOKEN = Pattern.compile("\"paymentToken\"\\s*:\\s*\"([^\"]*)\"");
@@ -37,14 +23,6 @@ public final class PaymentGatewayStub implements AutoCloseable {
     private final String jwkSetJson;
     private final DisposableServer server;
 
-    /**
-     * A charge request received by the stub.
-     *
-     * @param idempotencyKey {@code Idempotency-Key} header
-     * @param authorization  {@code Authorization} header, {@code null} when absent
-     * @param orderId        order id of the body
-     * @param paymentToken   payment token of the body
-     */
     public record RecordedCharge(String idempotencyKey, String authorization, String orderId, String paymentToken) {
     }
 
@@ -62,30 +40,14 @@ public final class PaymentGatewayStub implements AutoCloseable {
                 .bindNow();
     }
 
-    /**
-     * Starts the stub on a free port of {@code localhost}.
-     *
-     * @param jwkSetJson the JWK set served at {@code /jwks}
-     * @return the running stub
-     */
     public static PaymentGatewayStub start(String jwkSetJson) {
         return new PaymentGatewayStub(jwkSetJson);
     }
 
-    /**
-     * Base URL of the stub.
-     *
-     * @return {@code http://localhost:<port>}
-     */
     public String baseUrl() {
         return "http://localhost:" + server.port();
     }
 
-    /**
-     * Charges received so far.
-     *
-     * @return an immutable snapshot
-     */
     public List<RecordedCharge> charges() {
         return List.copyOf(charges);
     }

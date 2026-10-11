@@ -43,7 +43,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class CreateEventUseCaseImplTest {
-
     private static final Instant EVENT_DATE = NOW.plus(Duration.ofDays(30));
     private static final EventPolicy POLICY = new EventPolicy(1_000, Duration.ofSeconds(1), 4);
 

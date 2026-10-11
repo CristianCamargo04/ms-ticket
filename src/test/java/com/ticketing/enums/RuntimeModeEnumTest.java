@@ -6,7 +6,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 class RuntimeModeEnumTest {
-
     @ParameterizedTest(name = "{0}: api={1} worker={2}")
     @CsvSource({
             "ALL,    true,  true",

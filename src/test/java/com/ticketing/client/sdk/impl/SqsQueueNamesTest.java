@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.Test;
 
 class SqsQueueNamesTest {
-
     @Test
     void shouldExposeQueueNames() {
         SqsQueueNames names = new SqsQueueNames("reservation", "payment");

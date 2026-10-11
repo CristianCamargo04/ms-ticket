@@ -52,14 +52,9 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-/**
- * Authorization rules of the filter chain (against a catch-all probe controller, so only security decides the
- * outcome) and the JWT validation rules of the decoder.
- */
 @WebFluxTest(controllers = SecurityConfigTest.ProbeController.class)
 @Import({RestControllerTestConfig.class, SecurityConfigTest.ProbeController.class})
 class SecurityConfigTest {
-
     private static final String ISSUER = "https://issuer.example/default";
     private static final String AUDIENCE = "ms-ticket";
 
@@ -69,10 +64,8 @@ class SecurityConfigTest {
     @MockitoBean
     private ReactiveJwtDecoder reactiveJwtDecoder;
 
-    /** Answers 200 on every path and method: the status only reflects the security decision. */
     @RestController
     static class ProbeController {
-
         @RequestMapping("/**")
         Mono<String> any() {
             return Mono.just("ok");
@@ -344,9 +337,7 @@ class SecurityConfigTest {
                 .expectHeader().valueEquals(StrictTransportSecurityHeader.NAME, StrictTransportSecurityHeader.VALUE);
     }
 
-    /** Expected {@code Strict-Transport-Security} header. */
     private static final class StrictTransportSecurityHeader {
-
         static final String NAME = "Strict-Transport-Security";
         static final String VALUE = "max-age=31536000 ; includeSubDomains";
 

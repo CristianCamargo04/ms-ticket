@@ -41,23 +41,15 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 import reactor.core.publisher.Mono;
 
-/**
- * End-to-end JWT validation against a real OAuth2 issuer (mock-oauth2-server, the same flow as Cognito): signature
- * checked with the issuer's JWKS, issuer, audience and expiry validated, roles mapped by {@link JwtRoleConverter}.
- * mock-oauth2-server signs every issuer id with its own key ({@code kid} = issuer id), so the issuer check is
- * exercised with a token of the trusted key whose {@code iss} claim is overridden.
- */
 @Testcontainers
 @WebFluxTest(controllers = OrderRestControllerImpl.class)
 @Import(SecurityIntegrationTestConfig.class)
 class SecurityConfigIT {
-
     private static final int PORT = 8080;
     private static final String AUDIENCE = "ms-ticket";
     private static final String IDEMPOTENCY_KEY = "it-6f1c2a9e-0b7d-4c55";
     private static final String FOREIGN_ISSUER = "https://evil.example/default";
 
-    /** Token claims per requested scope (mock-oauth2-server request mappings). */
     private static final String ISSUER_CONFIG = """
             {"interactiveLogin": false, "tokenCallbacks": [{"issuerId": "default", "tokenExpiry": 300,
               "requestMappings": [
@@ -106,7 +98,6 @@ class SecurityConfigIT {
         return "http://" + ISSUER.getHost() + ":" + ISSUER.getMappedPort(PORT) + "/" + issuerId;
     }
 
-    /** Obtains a signed access token (client credentials grant). */
     private static String token(String issuerId, String scope) {
         Map<String, Object> response = WebClient.create(issuer(issuerId)).post().uri("/token")
                 .body(BodyInserters.fromFormData("grant_type", "client_credentials")
@@ -178,7 +169,7 @@ class SecurityConfigIT {
     void shouldRejectTokensSignedByTheTrustedKeyButIssuedByAnotherIssuer() throws ParseException {
         String accessToken = token("default", "foreign-issuer");
         SignedJWT jwt = SignedJWT.parse(accessToken);
-        // Same signing key as the accepted tokens: only the issuer validator can reject it.
+
         assertThat(jwt.getHeader().getKeyID()).isEqualTo(SignedJWT.parse(token("default", "customer"))
                 .getHeader().getKeyID());
         assertThat(jwt.getJWTClaimsSet().getIssuer()).isEqualTo(FOREIGN_ISSUER);

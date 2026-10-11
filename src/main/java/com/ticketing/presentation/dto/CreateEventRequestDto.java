@@ -12,16 +12,6 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.Instant;
 
-/**
- * Body of {@code POST /api/v1/events}.
- *
- * @param name          display name
- * @param venue         venue name
- * @param eventDate     future date of the event
- * @param totalCapacity number of tickets (the business limit is enforced by the use case)
- * @param ticketPrice   unit price, two decimals at most
- * @param currency      ISO-4217 currency code
- */
 public record CreateEventRequestDto(
         @NotBlank @Size(max = 120) String name,
         @NotBlank @Size(max = 120) String venue,

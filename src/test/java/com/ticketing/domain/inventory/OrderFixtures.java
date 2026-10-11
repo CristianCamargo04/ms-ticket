@@ -7,11 +7,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.stream.IntStream;
 
-/**
- * Orders in typical states for the inventory command tests.
- */
 final class OrderFixtures {
-
     static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
     static final Instant HOLD_EXPIRES_AT = NOW.plusSeconds(600);
     static final List<String> TICKETS = List.of("T-000001", "T-000002");

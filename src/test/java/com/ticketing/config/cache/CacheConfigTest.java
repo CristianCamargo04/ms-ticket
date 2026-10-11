@@ -15,7 +15,6 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 
 class CacheConfigTest {
-
     private final CacheConfig config = new CacheConfig();
 
     @Configuration(proxyBeanMethods = false)

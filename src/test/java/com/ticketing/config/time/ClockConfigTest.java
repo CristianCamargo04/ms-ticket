@@ -12,7 +12,6 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 class ClockConfigTest {
-
     private final ClockConfig config = new ClockConfig();
 
     @Test

@@ -15,28 +15,11 @@ import java.time.Clock;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
-/**
- * Accepts a purchase order: validates the quantity, derives the order id from the customer and the idempotency key
- * (UUID v5), applies a soft availability check on the cached event and queues the order (see
- * {@link QueuedOrderAdmission}). The inventory is never touched here: the reservation is made by the order worker.
- */
 @Service
 public class PlaceOrderUseCaseImpl implements PlaceOrderUseCase {
-
     private final QueuedOrderAdmission admission;
     private final OrderPolicy orderPolicy;
 
-    /**
-     * Creates the use case.
-     *
-     * @param orderPersistence    orders table
-     * @param eventPersistence    events table (cache loader)
-     * @param eventCacheService   event cache
-     * @param sqsOrderQueueClient order queues
-     * @param orderPolicy         order rules
-     * @param publishRetryPolicy  retries of the reservation message publication
-     * @param clock               time source
-     */
     public PlaceOrderUseCaseImpl(OrderPersistence orderPersistence, EventPersistence eventPersistence,
                                  EventCacheService eventCacheService, SqsOrderQueueClient sqsOrderQueueClient,
                                  OrderPolicy orderPolicy, RetryPolicy publishRetryPolicy, Clock clock) {
@@ -45,9 +28,6 @@ public class PlaceOrderUseCaseImpl implements PlaceOrderUseCase {
         this.orderPolicy = orderPolicy;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public Mono<OrderData> execute(PlaceOrderRequest request) {
         return Mono.defer(() -> {

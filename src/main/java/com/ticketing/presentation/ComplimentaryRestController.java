@@ -12,21 +12,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import reactor.core.publisher.Mono;
 
-/**
- * REST contract of complimentary tickets (ADMIN).
- */
 @RequestMapping("/api/v1/events/{eventId}/complimentary-tickets")
 public interface ComplimentaryRestController {
-
-    /**
-     * Accepts a complimentary issue and queues it.
-     *
-     * @param eventId        the event identifier
-     * @param idempotencyKey the required idempotency key ({@code Idempotency-Key} header)
-     * @param request        beneficiary and quantity
-     * @param httpRequest    the request (security and correlation context)
-     * @return 202 with the accepted order and a {@code Location: /api/v1/orders/{orderId}} header
-     */
     @PostMapping
     Mono<ResponseEntity<OrderAcceptedResponseDto>> issueComplimentary(
             @PathVariable("eventId") String eventId,

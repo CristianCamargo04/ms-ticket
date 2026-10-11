@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 class TicketEntityMapperTest {
-
     private final TicketEntityMapper mapper = new TicketEntityMapper();
 
     @Test

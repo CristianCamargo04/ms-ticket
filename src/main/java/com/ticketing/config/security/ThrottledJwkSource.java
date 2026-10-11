@@ -13,49 +13,21 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.Assert;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SynchronousSink;
 
-/**
- * Verification keys of the JWT decoder, downloaded from the issuer's JWK set endpoint with a bounded number of calls.
- *
- * <p>Spring Security's remote JWK source downloads the key set again for every token whose key id ({@code kid}) it
- * does not know, so any anonymous caller could make the service call the issuer once per forged bearer token. This
- * source instead:
- * <ul>
- *   <li>downloads the key set lazily on the first token; concurrent requests share the in-flight download, and a
- *       failed first download is not cached (the next token retries it);</li>
- *   <li>serves known keys from memory;</li>
- *   <li>on an unknown key id (key rotation) downloads the key set again at most once per {@code minRefreshInterval}
- *       measured from the previous download; in between, such tokens find no key and are rejected without any
- *       call;</li>
- *   <li>keeps the previous keys when a refresh fails, so a transient issuer outage never invalidates valid tokens.</li>
- * </ul>
- */
+@Slf4j
 public final class ThrottledJwkSource implements Function<SignedJWT, Flux<JWK>> {
-
-    /** {@link Mono#cache} time-to-live meaning "until replaced" (Reactor treats this exact value as infinite). */
     private static final Duration UNTIL_REPLACED = Duration.ofMillis(Long.MAX_VALUE);
-
-    private static final Logger log = LoggerFactory.getLogger(ThrottledJwkSource.class);
 
     private final Mono<JWKSet> download;
     private final Clock clock;
     private final Duration minRefreshInterval;
     private final AtomicReference<Mono<KeySet>> current;
 
-    /**
-     * Creates the source; nothing is downloaded until the first token is verified.
-     *
-     * @param jwkSetDocument     cold publisher downloading the JWK set document (one HTTP call per subscription)
-     * @param clock              time source of the refresh throttle
-     * @param minRefreshInterval minimum time between two downloads triggered by unknown key ids
-     * @throws IllegalArgumentException when the interval is not positive
-     */
     public ThrottledJwkSource(Mono<String> jwkSetDocument, Clock clock, Duration minRefreshInterval) {
         Objects.requireNonNull(jwkSetDocument, "jwkSetDocument");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -66,12 +38,6 @@ public final class ThrottledJwkSource implements Function<SignedJWT, Flux<JWK>> 
                 .cache(_ -> UNTIL_REPLACED, _ -> Duration.ZERO, () -> Duration.ZERO));
     }
 
-    /**
-     * Selects the keys matching the token header (key id, algorithm family, use).
-     *
-     * @param jwt the token being verified
-     * @return the candidate keys; empty when none matches (the token is then rejected as invalid)
-     */
     @Override
     public Flux<JWK> apply(SignedJWT jwt) {
         JWKSelector selector = new JWKSelector(JWKMatcher.forJWSHeader(jwt.getHeader()));
@@ -87,11 +53,6 @@ public final class ThrottledJwkSource implements Function<SignedJWT, Flux<JWK>> 
                 .flatMapIterable(Function.identity());
     }
 
-    /**
-     * Downloads the key set again unless the given generation is younger than the throttle interval or another
-     * request already replaced it; a failed download keeps the stale keys (with a fresh timestamp, so it is
-     * throttled as well).
-     */
     private Mono<KeySet> refresh(Mono<KeySet> generation, KeySet stale) {
         return Mono.defer(() -> {
             Instant now = clock.instant();
@@ -120,12 +81,6 @@ public final class ThrottledJwkSource implements Function<SignedJWT, Flux<JWK>> 
         }
     }
 
-    /**
-     * A downloaded key set.
-     *
-     * @param jwkSet   the keys
-     * @param loadedAt when the download that produced them started
-     */
     private record KeySet(JWKSet jwkSet, Instant loadedAt) {
     }
 }

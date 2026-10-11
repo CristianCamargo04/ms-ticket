@@ -19,29 +19,12 @@ import com.ticketing.persistence.OrderPersistence;
 import com.ticketing.util.ReactiveRetryUtil;
 import java.time.Clock;
 import java.time.Instant;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.RetryBackoffSpec;
 
-/**
- * Idempotent admission of a {@code QUEUED} order, shared by the place-order and issue-complimentary use cases (API fast
- * path: it never touches the inventory).
- *
- * <ol>
- *     <li>An order with the same deterministic id is replayed: the same request (fingerprint, event, owner, type and
- *     quantity) returns it (republishing its reservation message while it is still queued), any difference is an
- *     {@link IdempotencyKeyConflictException}.</li>
- *     <li>Otherwise the event is read through the cache: missing, not on sale or (optionally) sold out are rejected.</li>
- *     <li>The order is inserted with {@code attribute_not_exists}; losing that race to a concurrent duplicate request
- *     reloads the winner and replays it.</li>
- *     <li>The reservation message is published with retries; a final failure is only logged because the order is
- *     already persisted and the dispatch sweeper republishes it after its dispatch deadline.</li>
- * </ol>
- */
+@Slf4j
 final class QueuedOrderAdmission {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(QueuedOrderAdmission.class);
 
     private final OrderPersistence orderPersistence;
     private final EventPersistence eventPersistence;
@@ -51,17 +34,6 @@ final class QueuedOrderAdmission {
     private final RetryBackoffSpec publishRetry;
     private final Clock clock;
 
-    /**
-     * Creates the helper.
-     *
-     * @param orderPersistence    orders table
-     * @param eventPersistence    events table (cache loader)
-     * @param eventCacheService   event cache
-     * @param sqsOrderQueueClient order queues
-     * @param orderPolicy         order rules (dispatch deadline)
-     * @param publishRetryPolicy  retries of the message publication
-     * @param clock               time source
-     */
     QueuedOrderAdmission(OrderPersistence orderPersistence, EventPersistence eventPersistence,
                          EventCacheService eventCacheService, SqsOrderQueueClient sqsOrderQueueClient,
                          OrderPolicy orderPolicy, RetryPolicy publishRetryPolicy, Clock clock) {
@@ -76,26 +48,12 @@ final class QueuedOrderAdmission {
         this.clock = clock;
     }
 
-    /**
-     * Validates a requested quantity.
-     *
-     * @param quantity requested tickets
-     * @param max      maximum tickets allowed
-     * @throws DomainValidationException when {@code quantity} is outside {@code 1..max}
-     */
     static void requireQuantity(int quantity, int max) {
         if (quantity < 1 || quantity > max) {
             throw new DomainValidationException("quantity must be between 1 and " + max);
         }
     }
 
-    /**
-     * Admits (or idempotently replays) an order.
-     *
-     * @param admission the order to admit
-     * @return the queued order, or the previously created one; error signals {@link IdempotencyKeyConflictException},
-     *         {@link EventNotFoundException}, {@link EventNotOnSaleException}, {@link InsufficientInventoryException}
-     */
     Mono<OrderData> admit(Admission admission) {
         return Mono.defer(() -> orderPersistence.findById(admission.orderId()))
                 .flatMap(existing -> replay(existing, admission))
@@ -123,12 +81,12 @@ final class QueuedOrderAdmission {
     }
 
     private Mono<OrderData> accepted(OrderData order, Admission admission) {
-        LOGGER.info("Order {} ({}) queued for event {}", order.orderId(), order.type(), order.eventId());
+        log.info("Order {} ({}) queued for event {}", order.orderId(), order.type(), order.eventId());
         return publishReservation(order, admission.correlationId()).thenReturn(order);
     }
 
     private Mono<OrderData> concurrentDuplicate(Admission admission) {
-        LOGGER.debug("Order {} was created by a concurrent duplicate request", admission.orderId());
+        log.debug("Order {} was created by a concurrent duplicate request", admission.orderId());
         return Mono.defer(() -> orderPersistence.findById(admission.orderId()))
                 .switchIfEmpty(Mono.error(() -> new IllegalStateException(
                         "Order " + admission.orderId() + " exists but could not be read")))
@@ -145,11 +103,6 @@ final class QueuedOrderAdmission {
         return Mono.just(existing);
     }
 
-    /**
-     * Idempotency payload check: the request fingerprint must match and, independently of how complete that
-     * fingerprint is, so must the identity of the order (event, owner or beneficiary, type and quantity), so that
-     * reusing a key for another order is never answered with the first one.
-     */
     private static boolean isSameOrder(OrderData existing, Admission admission) {
         return existing.matchesRequest(admission.requestHash())
                 && existing.eventId().equals(admission.eventId())
@@ -163,11 +116,11 @@ final class QueuedOrderAdmission {
                         order.orderId(), order.eventId(), correlationIdOrOrderId(correlationId, order),
                         clock.instant())))
                 .retryWhen(publishRetry)
-                .doOnNext(messageId -> LOGGER.debug("Reservation message {} published for order {}", messageId,
+                .doOnNext(messageId -> log.debug("Reservation message {} published for order {}", messageId,
                         order.orderId()))
                 .then()
                 .onErrorResume(error -> {
-                    LOGGER.warn("Reservation message of order {} not published, the dispatch sweeper will republish"
+                    log.warn("Reservation message of order {} not published, the dispatch sweeper will republish"
                             + " it: {}", order.orderId(), error.toString());
                     return Mono.empty();
                 });
@@ -177,19 +130,6 @@ final class QueuedOrderAdmission {
         return correlationId == null || correlationId.isBlank() ? order.orderId() : correlationId;
     }
 
-    /**
-     * An order to admit.
-     *
-     * @param orderId               deterministic order id
-     * @param eventId               event identifier
-     * @param customerId            owner (customer or complimentary beneficiary)
-     * @param type                  order type
-     * @param quantity              number of tickets (already validated)
-     * @param idempotencyKey        idempotency key of the request
-     * @param requestHash           request fingerprint
-     * @param correlationId         request correlation id
-     * @param softAvailabilityCheck whether an event without available tickets rejects the order up front
-     */
     record Admission(String orderId, String eventId, String customerId, OrderTypeEnum type, int quantity,
                      String idempotencyKey, String requestHash, String correlationId,
                      boolean softAvailabilityCheck) {

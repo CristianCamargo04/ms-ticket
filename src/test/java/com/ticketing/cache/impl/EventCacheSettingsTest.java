@@ -7,7 +7,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class EventCacheSettingsTest {
-
     @Test
     void shouldExposeSettings() {
         EventCacheSettings settings = new EventCacheSettings(Duration.ofSeconds(2), 100);

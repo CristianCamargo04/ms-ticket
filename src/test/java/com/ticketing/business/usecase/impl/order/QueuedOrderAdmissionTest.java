@@ -61,7 +61,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class QueuedOrderAdmissionTest {
-
     private static final String IDEMPOTENCY_KEY = "key-12345678";
 
     @Mock

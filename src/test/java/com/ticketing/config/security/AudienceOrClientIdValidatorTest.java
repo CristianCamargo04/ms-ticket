@@ -13,7 +13,6 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 class AudienceOrClientIdValidatorTest {
-
     private static final String AUDIENCE = "ms-ticket";
 
     private final AudienceOrClientIdValidator validator = new AudienceOrClientIdValidator(AUDIENCE);
@@ -36,7 +35,6 @@ class AudienceOrClientIdValidatorTest {
 
     @Test
     void shouldAcceptAnAudienceSentAsASingleJsonString() {
-        // mock-oauth2-server serializes a single audience as a string, not an array
         assertThat(validate(jwt -> jwt.claim("aud", AUDIENCE)).hasErrors()).isFalse();
     }
 

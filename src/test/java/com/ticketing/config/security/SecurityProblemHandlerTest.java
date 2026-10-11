@@ -25,7 +25,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class SecurityProblemHandlerTest {
-
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final ProblemDetailFactory problems =
@@ -94,10 +93,4 @@ class SecurityProblemHandlerTest {
         assertThat(body.get("errorCode").asString()).isEqualTo("FORBIDDEN");
     }
 
-    @Test
-    void shouldRequireItsCollaborators() {
-        assertThatNullPointerException().isThrownBy(() -> new SecurityProblemHandler(null,
-                new ProblemDetailResponseWriter(JSON)));
-        assertThatNullPointerException().isThrownBy(() -> new SecurityProblemHandler(problems, null));
-    }
 }

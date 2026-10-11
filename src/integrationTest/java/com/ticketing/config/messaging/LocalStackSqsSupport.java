@@ -13,24 +13,12 @@ import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 
-/**
- * LocalStack SQS fixtures of the listener container integration test (test code: blocking {@code join()} is fine).
- */
 final class LocalStackSqsSupport {
-
-    /** Pinned: {@code latest} requires a paid auth token. */
     static final DockerImageName LOCALSTACK_IMAGE = DockerImageName.parse("localstack/localstack:4.9");
 
     private LocalStackSqsSupport() {
     }
 
-    /**
-     * A source queue and its dead-letter queue.
-     *
-     * @param url    source queue URL
-     * @param name   source queue name
-     * @param dlqUrl dead-letter queue URL
-     */
     record QueuePair(String url, String name, String dlqUrl) {
     }
 
@@ -48,10 +36,6 @@ final class LocalStackSqsSupport {
                 .build();
     }
 
-    /**
-     * Creates a queue whose redrive policy moves a message to a fresh dead-letter queue after
-     * {@code maxReceiveCount} receives.
-     */
     static QueuePair createQueueWithDeadLetterQueue(SqsAsyncClient sqs, String name, int maxReceiveCount,
                                                     int visibilityTimeoutSeconds) {
         String dlqUrl = sqs.createQueue(request -> request.queueName(name + "-dlq")).join().queueUrl();
@@ -73,7 +57,6 @@ final class LocalStackSqsSupport {
                 MessageAttributeValue.builder().dataType("String").stringValue(correlationId).build()))).join();
     }
 
-    /** Visible plus in-flight messages of a queue. */
     static int pendingMessages(SqsAsyncClient sqs, String queueUrl) {
         Map<QueueAttributeName, String> attributes = sqs.getQueueAttributes(request -> request.queueUrl(queueUrl)
                         .attributeNames(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES,
@@ -83,7 +66,6 @@ final class LocalStackSqsSupport {
                 + Integer.parseInt(attributes.get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE));
     }
 
-    /** One short poll of a queue (used on the dead-letter queue, which no container consumes). */
     static List<Message> receive(SqsAsyncClient sqs, String queueUrl) {
         return sqs.receiveMessage(request -> request.queueUrl(queueUrl).maxNumberOfMessages(10).waitTimeSeconds(1))
                 .join().messages();

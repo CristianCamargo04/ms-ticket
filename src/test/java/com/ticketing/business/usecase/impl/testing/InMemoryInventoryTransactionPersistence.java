@@ -25,13 +25,7 @@ import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import reactor.core.publisher.Mono;
 
-/**
- * In-memory {@link InventoryTransactionPersistence} with the conditional semantics of implementation spec 6.3. Each
- * call is all-or-nothing under the store monitor; failed conditions are reported with the spec priority (order, then
- * event counters, then tickets).
- */
 public final class InMemoryInventoryTransactionPersistence implements InventoryTransactionPersistence {
-
     private final InMemoryTicketingStore store;
     private final AtomicLong transitionSequence = new AtomicLong();
     private final AtomicInteger applied = new AtomicInteger();
@@ -123,22 +117,18 @@ public final class InMemoryInventoryTransactionPersistence implements InventoryT
                 order -> order.withRelease(command.resultingStatus(), command.reason().name(), command.now())));
     }
 
-    /** Successful transactions. */
     public int appliedCount() {
         return applied.get();
     }
 
-    /** Transactions cancelled by the order condition. */
     public int orderStateChangedCount() {
         return orderStateChanged.get();
     }
 
-    /** Transactions cancelled by the event counter condition. */
     public int insufficientInventoryCount() {
         return insufficientInventory.get();
     }
 
-    /** Transactions cancelled by a ticket condition (stale selection). */
     public int staleTicketSelectionCount() {
         return staleTicketSelections.get();
     }

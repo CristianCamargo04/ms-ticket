@@ -14,7 +14,6 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 class ReactiveRetryUtilTest {
-
     private static final Duration MIN = Duration.ofMillis(100);
     private static final Duration MAX = Duration.ofSeconds(1);
     private static final Predicate<Throwable> TRANSIENT = TransientFailure.class::isInstance;
@@ -25,7 +24,6 @@ class ReactiveRetryUtilTest {
         }
     }
 
-    /** Fails with a {@link TransientFailure} for the first {@code failures} subscriptions, then emits "ok". */
     private static Mono<String> failingTimes(int failures, AtomicInteger subscriptions) {
         return Mono.defer(() -> {
             int attempt = subscriptions.incrementAndGet();

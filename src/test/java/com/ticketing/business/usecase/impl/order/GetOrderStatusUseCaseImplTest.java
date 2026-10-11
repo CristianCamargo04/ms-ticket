@@ -20,7 +20,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class GetOrderStatusUseCaseImplTest {
-
     @Mock
     private OrderPersistence orderPersistence;
 

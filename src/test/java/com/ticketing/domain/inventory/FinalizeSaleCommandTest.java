@@ -14,7 +14,6 @@ import com.ticketing.enums.TransitionReasonEnum;
 import org.junit.jupiter.api.Test;
 
 class FinalizeSaleCommandTest {
-
     @Test
     void shouldDescribeASaleOfTheHeldTickets() {
         OrderData order = pendingConfirmation();

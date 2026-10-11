@@ -43,7 +43,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class CancelOrderUseCaseImplTest {
-
     private static final CancelOrderRequest REQUEST = new CancelOrderRequest(ORDER_ID, CUSTOMER_ID);
     private static final String REASON = TransitionReasonEnum.CUSTOMER_CANCELLATION.name();
 

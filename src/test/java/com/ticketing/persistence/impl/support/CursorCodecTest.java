@@ -15,7 +15,6 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
 class CursorCodecTest {
-
     private static final Map<String, ScalarAttributeType> KEY_SCHEMA = Map.of(
             "eventId", ScalarAttributeType.S,
             "status", ScalarAttributeType.S,
@@ -73,11 +72,6 @@ class CursorCodecTest {
         assertThat(CursorCodec.decode(cursor, KEY_SCHEMA).get("eventDate")).isEqualTo(AttributeValue.fromN(number));
     }
 
-    /**
-     * Numbers are never expanded: {@code 1e999999999} would otherwise become a billion-character string
-     * ({@code OutOfMemoryError}), and values DynamoDB cannot hold (more than 38 digits, fractions) would fail there
-     * as a server error instead of a validation error.
-     */
     @ParameterizedTest
     @ValueSource(strings = {"1e999999999", "1E999999999", "1e60", "1.5", "1.50E2", "150.0", "+150", " 150", "",
             "-", "9223372036854775808", "-9223372036854775809", "12345678901234567890", "%EF%BC%91"})

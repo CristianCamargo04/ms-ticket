@@ -24,7 +24,6 @@ import reactor.test.StepVerifier;
 import tools.jackson.databind.json.JsonMapper;
 
 class WorkerModeApiWebFilterTest {
-
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-10T10:00:00Z"), ZoneOffset.UTC);
 
     private final WorkerModeApiWebFilter filter = new WorkerModeApiWebFilter(new ProblemDetailFactory(CLOCK),
@@ -76,11 +75,4 @@ class WorkerModeApiWebFilterTest {
                 .isLessThan(-100);
     }
 
-    @Test
-    void shouldRequireItsCollaborators() {
-        ProblemDetailResponseWriter writer = new ProblemDetailResponseWriter(JsonMapper.builder().build());
-        assertThatNullPointerException().isThrownBy(() -> new WorkerModeApiWebFilter(null, writer));
-        assertThatNullPointerException()
-                .isThrownBy(() -> new WorkerModeApiWebFilter(new ProblemDetailFactory(CLOCK), null));
-    }
 }

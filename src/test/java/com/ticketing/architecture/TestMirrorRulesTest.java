@@ -20,18 +20,7 @@ import com.tngtech.archunit.lang.SimpleConditionEvent;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
-/**
- * Enforces the test mirror of implementation spec section 1 (item 6): every production class has a
- * {@code <SimpleName>Test} in the same package under {@code src/test/java}.
- *
- * <p>Production classes are imported with {@code ImportOption.DoNotIncludeTests} and test classes with
- * {@code ImportOption.OnlyIncludeTests}. Nested types are covered by the test of their top-level class.
- * Exempt: interfaces (including annotation types), {@code TicketingApplication} and the pure data carriers
- * of the packages listed in {@link #EXEMPT_DATA_CARRIER_PACKAGES}.
- */
 class TestMirrorRulesTest {
-
-    /** Packages of pure data carriers exempt from the mirror (exceptions: TicketingExceptionTest et al.). */
     private static final String[] EXEMPT_DATA_CARRIER_PACKAGES = {
         "com.ticketing.presentation.dto..",
         "com.ticketing.client.dto..",

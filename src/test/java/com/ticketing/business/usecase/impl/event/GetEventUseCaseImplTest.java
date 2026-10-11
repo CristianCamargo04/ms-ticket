@@ -24,7 +24,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class GetEventUseCaseImplTest {
-
     @Mock
     private EventCacheService eventCacheService;
 

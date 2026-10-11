@@ -2,12 +2,7 @@ package com.ticketing.business.usecase.impl.testing;
 
 import java.util.random.RandomGenerator;
 
-/**
- * Deterministic {@link RandomGenerator} replaying a script of values: {@link #nextInt(int)} returns the next scripted
- * value reduced modulo the bound (the script cycles), so tests can pin the random start ticket and the random sample.
- */
 public final class ScriptedRandomGenerator implements RandomGenerator {
-
     private final int[] script;
     private int position;
 

@@ -19,7 +19,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class ReleaseInventoryCommandTest {
-
     private static OrderData holding(TicketStatusEnum status) {
         return status == TicketStatusEnum.RESERVED ? reserved() : pendingConfirmation();
     }

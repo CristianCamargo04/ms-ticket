@@ -15,7 +15,6 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 class TicketingExceptionTest {
-
     private static final Throwable CAUSE = new IOException("boom");
 
     static Stream<Arguments> everyConcreteException() {

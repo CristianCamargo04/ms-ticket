@@ -12,7 +12,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class EventDataTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
     private static final Instant EVENT_DATE = Instant.parse("2026-12-24T20:00:00Z");
     private static final BigDecimal PRICE = new BigDecimal("49.90");

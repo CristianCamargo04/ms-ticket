@@ -7,7 +7,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class BatchRetryPolicyTest {
-
     private final BatchRetryPolicy policy = BatchRetryPolicy.DEFAULT;
 
     @Test

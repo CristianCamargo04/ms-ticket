@@ -28,12 +28,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
-/**
- * Overselling and double assignment are impossible under real contention on DynamoDB Local: only the conditional
- * transactions arbitrate, exactly like in production.
- */
 class InventoryTransactionPersistenceImplConcurrencyIT {
-
     private static final Duration TIMEOUT = Duration.ofMinutes(5);
     private static final Duration HOLD = Duration.ofMinutes(10);
     private static final int CAPACITY = 50;
@@ -109,7 +104,7 @@ class InventoryTransactionPersistenceImplConcurrencyIT {
     @Test
     void shouldLetExactlyOneOfTwoOrdersWinTheSameTicket() {
         int rounds = 20;
-        // One spare ticket keeps the event counter condition true, so every loser is a pure ticket conflict.
+
         EventData event = context.onSaleEventWithTickets(rounds + 1);
 
         for (int round = 1; round <= rounds; round++) {
@@ -151,11 +146,6 @@ class InventoryTransactionPersistenceImplConcurrencyIT {
         assertThat(counters.reservedCount()).isEqualTo(rounds);
     }
 
-    /**
-     * What the reservation worker does: read a few candidates from the (eventually consistent) availability index
-     * starting at a random ticket, pick one at random and let the transaction arbitrate; a stale selection or a
-     * transaction conflict is retried with backoff.
-     */
     private static Mono<InventoryWriteOutcome> reserveWithRetries(EventData event, OrderData order) {
         return Mono.defer(() -> {
                     Instant now = PersistenceTestContext.now();

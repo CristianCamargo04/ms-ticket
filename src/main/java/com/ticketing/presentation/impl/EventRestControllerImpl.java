@@ -11,42 +11,21 @@ import com.ticketing.presentation.dto.PageResponseDto;
 import com.ticketing.presentation.impl.support.ResourceIdValidator;
 import com.ticketing.presentation.mapper.EventDtoMapper;
 import java.net.URI;
-import java.util.Objects;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
 
-/**
- * Events endpoints; the mappings, {@code @Valid} and binding annotations are inherited from
- * {@link EventRestController}. Path identifiers are checked by {@link ResourceIdValidator}.
- */
+@RequiredArgsConstructor
 @RestController
 public class EventRestControllerImpl implements EventRestController {
-
-    /** Path template of the event resource ({@code Location} of a created event). */
     static final String EVENT_PATH = "/api/v1/events/{eventId}";
 
     private final CreateEventUseCase createEventUseCase;
     private final ListEventsUseCase listEventsUseCase;
     private final GetEventUseCase getEventUseCase;
     private final EventDtoMapper mapper;
-
-    /**
-     * Creates the controller.
-     *
-     * @param createEventUseCase creates events
-     * @param listEventsUseCase  lists events
-     * @param getEventUseCase    reads one event
-     * @param mapper             DTO mapper
-     */
-    public EventRestControllerImpl(CreateEventUseCase createEventUseCase, ListEventsUseCase listEventsUseCase,
-                                   GetEventUseCase getEventUseCase, EventDtoMapper mapper) {
-        this.createEventUseCase = Objects.requireNonNull(createEventUseCase, "createEventUseCase");
-        this.listEventsUseCase = Objects.requireNonNull(listEventsUseCase, "listEventsUseCase");
-        this.getEventUseCase = Objects.requireNonNull(getEventUseCase, "getEventUseCase");
-        this.mapper = Objects.requireNonNull(mapper, "mapper");
-    }
 
     @Override
     public Mono<ResponseEntity<EventResponseDto>> createEvent(CreateEventRequestDto request) {

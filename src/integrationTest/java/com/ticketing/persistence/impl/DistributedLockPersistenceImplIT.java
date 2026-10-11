@@ -14,7 +14,6 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 
 class DistributedLockPersistenceImplIT {
-
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
     private static final Duration LEASE = Duration.ofSeconds(30);
 

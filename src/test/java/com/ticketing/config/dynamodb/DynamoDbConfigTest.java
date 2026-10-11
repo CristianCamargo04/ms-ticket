@@ -22,7 +22,6 @@ import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedAsyncClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 
 class DynamoDbConfigTest {
-
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(AwsProperties.class)
     static class PropertiesConfig {

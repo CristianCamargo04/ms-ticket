@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 class TicketTransitionEntityMapperTest {
-
     private static final TicketTransitionData TRANSITION = new TicketTransitionData(EVENT_ID, "T-000009",
             "transition-1", TicketStatusEnum.AVAILABLE, TicketStatusEnum.RESERVED, ORDER_ID,
             TransitionReasonEnum.RESERVATION, "order-worker", NOW);

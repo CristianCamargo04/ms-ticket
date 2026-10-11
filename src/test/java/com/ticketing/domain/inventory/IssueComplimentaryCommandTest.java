@@ -16,7 +16,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class IssueComplimentaryCommandTest {
-
     private static OrderData complimentary() {
         return queued(OrderTypeEnum.COMPLIMENTARY, TICKETS.size());
     }

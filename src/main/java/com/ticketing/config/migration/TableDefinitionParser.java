@@ -18,38 +18,16 @@ import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import software.amazon.awssdk.services.dynamodb.model.TimeToLiveSpecification;
 import tools.jackson.databind.JsonNode;
 
-/**
- * Converts a migration file (a subset of the DynamoDB {@code CreateTable} API in JSON) into SDK requests.
- *
- * <p>Supported fields: {@code TableName} (a logical key resolved to the configured physical name),
- * {@code AttributeDefinitions}, {@code KeySchema}, {@code GlobalSecondaryIndexes} (with {@code Projection}),
- * {@code BillingMode} ({@code PAY_PER_REQUEST} only, as everywhere in the schema) and
- * {@code TimeToLiveSpecification} (applied with {@code UpdateTimeToLive} after the table is active). Any other field,
- * unknown enum value or missing attribute fails fast: a typo must never be ignored silently.
- */
 public class TableDefinitionParser {
-
     private static final Set<String> SUPPORTED_FIELDS = Set.of("TableName", "AttributeDefinitions", "KeySchema",
             "GlobalSecondaryIndexes", "BillingMode", "TimeToLiveSpecification");
 
     private final Map<String, String> physicalTableNames;
 
-    /**
-     * Creates the parser.
-     *
-     * @param physicalTableNames physical table name of every logical table name
-     */
     public TableDefinitionParser(Map<String, String> physicalTableNames) {
         this.physicalTableNames = Map.copyOf(physicalTableNames);
     }
 
-    /**
-     * Parser resolving the logical names used by the migration files ({@code events}, {@code tickets},
-     * {@code orders}, {@code ticket-transitions}, {@code distributed-locks}) to the configured tables.
-     *
-     * @param tables configured physical table names
-     * @return the parser
-     */
     public static TableDefinitionParser forTables(AwsProperties.Tables tables) {
         return new TableDefinitionParser(Map.of(
                 "events", tables.events(),
@@ -59,13 +37,6 @@ public class TableDefinitionParser {
                 "distributed-locks", tables.distributedLocks()));
     }
 
-    /**
-     * Parses a migration file.
-     *
-     * @param definition the parsed JSON
-     * @return the table creation request and the optional time-to-live specification
-     * @throws IllegalStateException when the definition is invalid
-     */
     public TableDefinition parse(JsonNode definition) {
         if (definition == null || !definition.isObject()) {
             throw invalid("the definition must be a JSON object");
@@ -187,17 +158,7 @@ public class TableDefinitionParser {
         return new IllegalStateException("Invalid DynamoDB migration definition: " + detail);
     }
 
-    /**
-     * Result of parsing one migration file.
-     *
-     * @param createTable the table creation request (physical table name)
-     * @param timeToLive  the time-to-live specification, {@code null} when the table has none
-     */
     public record TableDefinition(CreateTableRequest createTable, TimeToLiveSpecification timeToLive) {
-
-        /**
-         * Validates that the creation request is present.
-         */
         public TableDefinition {
             Objects.requireNonNull(createTable, "createTable");
         }

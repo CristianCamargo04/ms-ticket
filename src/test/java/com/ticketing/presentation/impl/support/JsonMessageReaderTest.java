@@ -19,7 +19,6 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 class JsonMessageReaderTest {
-
     private static final String RESERVATION = """
             {"orderId":"o-1","eventId":"e-1","correlationId":"corr-1","occurredAt":"2026-10-10T10:00:00Z"}
             """;
@@ -112,9 +111,6 @@ class JsonMessageReaderTest {
 
     @Test
     void shouldRequireDependenciesAndType() {
-        assertThatNullPointerException().isThrownBy(() -> new JsonMessageReader(null,
-                validatorFactory.getValidator()));
-        assertThatNullPointerException().isThrownBy(() -> new JsonMessageReader(JsonMapper.builder().build(), null));
         assertThatNullPointerException().isThrownBy(() -> reader.read(RESERVATION, null));
     }
 }

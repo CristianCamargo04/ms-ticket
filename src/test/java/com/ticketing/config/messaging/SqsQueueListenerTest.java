@@ -10,7 +10,6 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 class SqsQueueListenerTest {
-
     private static final Function<String, Mono<Void>> HANDLER = body -> Mono.empty();
 
     @Test

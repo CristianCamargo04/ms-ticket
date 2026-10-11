@@ -20,8 +20,6 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 
 class DomainPolicyConfigTest {
-
-    /** {@code nextInt()} of this generator is {@code 0x12345678}. */
     private static final RandomGenerator FIXED_RANDOM = () -> 0x1234_5678_9abc_def0L;
 
     private final DomainPolicyConfig config = new DomainPolicyConfig();
@@ -32,7 +30,6 @@ class DomainPolicyConfigTest {
     static class PropertiesConfig {
     }
 
-    /** Consumer resolving one of the two retry policies by parameter name, as the business layer does. */
     record RetryPolicyConsumer(RetryPolicy inventoryRetryPolicy, RetryPolicy publishRetryPolicy) {
     }
 

@@ -12,30 +12,12 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-/**
- * Converts {@link TicketData} to and from the {@code tickets} item, deriving the {@code statusKey} sort key of the
- * availability index ({@code <STATUS>#<ticketId>}).
- */
 @Component
 public class TicketEntityMapper {
-
-    /**
-     * Sort key of a ticket in the {@code eventId-statusKey-index}.
-     *
-     * @param status   the ticket status
-     * @param ticketId the ticket identifier
-     * @return {@code <STATUS>#<ticketId>}
-     */
     public static String statusKey(TicketStatusEnum status, String ticketId) {
         return status.name() + "#" + ticketId;
     }
 
-    /**
-     * Domain to entity.
-     *
-     * @param ticket the ticket
-     * @return the entity
-     */
     public TicketEntity toEntity(TicketData ticket) {
         TicketEntity entity = new TicketEntity();
         entity.setEventId(ticket.eventId());
@@ -49,13 +31,6 @@ public class TicketEntityMapper {
         return entity;
     }
 
-    /**
-     * Entity (full item or availability index projection) to domain.
-     *
-     * @param entity the entity
-     * @return the ticket
-     * @throws IllegalStateException when a mandatory attribute is missing
-     */
     public TicketData toDomain(TicketEntity entity) {
         return new TicketData(
                 entity.getEventId(),
@@ -67,22 +42,10 @@ public class TicketEntityMapper {
                 toInstant(entity.getUpdatedAt()));
     }
 
-    /**
-     * Domain to low-level item.
-     *
-     * @param ticket the ticket
-     * @return the item (no null attributes)
-     */
     public Map<String, AttributeValue> toItem(TicketData ticket) {
         return EntitySchemas.TICKET.itemToMap(toEntity(ticket), true);
     }
 
-    /**
-     * Low-level item to domain.
-     *
-     * @param item the item
-     * @return the ticket
-     */
     public TicketData fromItem(Map<String, AttributeValue> item) {
         return toDomain(EntitySchemas.TICKET.mapToItem(item));
     }

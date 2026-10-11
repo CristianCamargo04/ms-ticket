@@ -28,35 +28,15 @@ import reactor.core.publisher.Flux;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedAsyncClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 
-/**
- * Every persistence adapter wired against a fresh set of DynamoDB Local tables created from the real migrations,
- * plus helpers to seed events, tickets and orders.
- *
- * @param client       low-level client
- * @param tableNames   physical table names
- * @param events       events adapter
- * @param tickets      tickets adapter
- * @param orders       orders adapter
- * @param inventory    inventory transactions adapter
- * @param transitions  audit adapter
- * @param locks        distributed lock adapter
- */
 public record PersistenceTestContext(DynamoDbAsyncClient client, DynamoDbTableNames tableNames,
                                      EventPersistenceImpl events, TicketPersistenceImpl tickets,
                                      OrderPersistenceImpl orders, InventoryTransactionPersistenceImpl inventory,
                                      TicketTransitionPersistenceImpl transitions,
                                      DistributedLockPersistenceImpl locks) {
-
-    /** Number of deadline shards used by the tests. */
     public static final int DEADLINE_SHARDS = 4;
 
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
 
-    /**
-     * Creates new tables through the migration runner and wires the adapters.
-     *
-     * @return the context
-     */
     public static PersistenceTestContext create() {
         AwsProperties.Tables tables = DynamoDbLocalContainer.uniqueTables();
         DynamoDbLocalContainer.migrate(tables);
@@ -76,24 +56,10 @@ public record PersistenceTestContext(DynamoDbAsyncClient client, DynamoDbTableNa
                 new DistributedLockPersistenceImpl(client, names));
     }
 
-    /**
-     * The current instant truncated to milliseconds (the storage precision), so that the expected values a test
-     * derives from it ({@code now.plus(HOLD)}, ...) compare equal to the stored ones. The adapters do not rely on it:
-     * they return values with the storage precision themselves (see
-     * {@code InventoryTransactionPersistenceImplIT.shouldReturnTheStoredStateForSubMillisecondCommandInstants}).
-     *
-     * @return now
-     */
     public static Instant now() {
         return Instant.now().truncatedTo(ChronoUnit.MILLIS);
     }
 
-    /**
-     * Creates an ON_SALE event with {@code capacity} available tickets.
-     *
-     * @param capacity number of tickets
-     * @return the persisted event
-     */
     public EventData onSaleEventWithTickets(int capacity) {
         Instant now = now();
         EventData event = EventData.newPublishing(UUID.randomUUID().toString(), "Concert", "Arena",
@@ -106,14 +72,6 @@ public record PersistenceTestContext(DynamoDbAsyncClient client, DynamoDbTableNa
         return events.findById(event.eventId()).block(TIMEOUT);
     }
 
-    /**
-     * Inserts a queued order and returns it as read back from the table.
-     *
-     * @param eventId  the event
-     * @param type     the order type
-     * @param quantity number of tickets
-     * @return the persisted order
-     */
     public OrderData queuedOrder(String eventId, OrderTypeEnum type, int quantity) {
         Instant now = now();
         OrderData order = OrderData.newQueued(UUID.randomUUID().toString(), eventId, "customer-1", type, quantity,
@@ -122,22 +80,10 @@ public record PersistenceTestContext(DynamoDbAsyncClient client, DynamoDbTableNa
         return orders.findById(order.orderId()).block(TIMEOUT);
     }
 
-    /**
-     * Reads an event.
-     *
-     * @param eventId the event
-     * @return the event
-     */
     public EventData event(String eventId) {
         return events.findById(eventId).block(TIMEOUT);
     }
 
-    /**
-     * Reads an order.
-     *
-     * @param orderId the order
-     * @return the order
-     */
     public OrderData order(String orderId) {
         return orders.findById(orderId).block(TIMEOUT);
     }

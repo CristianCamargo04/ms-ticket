@@ -15,28 +15,14 @@ import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 
-/**
- * Complimentary tickets endpoint (ADMIN only). The issuer is the JWT subject of the caller; the beneficiary comes from
- * the body.
- */
 @RestController
 public class ComplimentaryRestControllerImpl implements ComplimentaryRestController {
-
     private final IssueComplimentaryTicketsUseCase issueComplimentaryTicketsUseCase;
     private final RequestContextResolver requestContextResolver;
     private final IdempotencyKeyResolver idempotencyKeyResolver;
     private final RequestFingerprintCalculator fingerprintCalculator;
     private final OrderDtoMapper mapper;
 
-    /**
-     * Creates the controller.
-     *
-     * @param issueComplimentaryTicketsUseCase queues complimentary orders
-     * @param requestContextResolver           resolves the caller
-     * @param idempotencyKeyResolver           validates the idempotency key header
-     * @param fingerprintCalculator            fingerprints idempotent requests
-     * @param mapper                           DTO mapper
-     */
     public ComplimentaryRestControllerImpl(IssueComplimentaryTicketsUseCase issueComplimentaryTicketsUseCase,
                                            RequestContextResolver requestContextResolver,
                                            IdempotencyKeyResolver idempotencyKeyResolver,

@@ -30,19 +30,10 @@ import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 
-/**
- * DynamoDB adapter of the {@code events} table.
- *
- * <p>Typed single-item reads go through the enhanced client; conditional writes and the paginated index query use
- * the low-level client so that every expression is explicit. Inventory counters are never written here: they only
- * change inside the inventory transactions.
- */
 @Repository
 public class EventPersistenceImpl implements EventPersistence {
-
     private static final Map<String, String> STATUS_NAME = Map.of("#status", "status");
 
-    /** Key attributes of the {@code status-eventDate-index} pages (table key + index key). */
     private static final Map<String, ScalarAttributeType> STATUS_INDEX_KEY = Map.of(
             "eventId", ScalarAttributeType.S,
             "status", ScalarAttributeType.S,
@@ -53,14 +44,6 @@ public class EventPersistenceImpl implements EventPersistence {
     private final EventEntityMapper mapper;
     private final String tableName;
 
-    /**
-     * Creates the adapter.
-     *
-     * @param dynamoDb       low-level client
-     * @param enhancedClient enhanced client
-     * @param tableNames     physical table names
-     * @param mapper         event mapper
-     */
     public EventPersistenceImpl(DynamoDbAsyncClient dynamoDb, DynamoDbEnhancedAsyncClient enhancedClient,
                                 DynamoDbTableNames tableNames, EventEntityMapper mapper) {
         this.dynamoDb = dynamoDb;
@@ -69,12 +52,6 @@ public class EventPersistenceImpl implements EventPersistence {
         this.mapper = mapper;
     }
 
-    /**
-     * {@inheritDoc}
-     *
-     * <p>The returned event is the stored item read back through the mapper, so its instants have the storage
-     * precision (epoch milliseconds) and it equals a later {@link #findById(String)}.
-     */
     @Override
     public Mono<EventData> create(EventData event) {
         return Mono.defer(() -> {
@@ -138,10 +115,6 @@ public class EventPersistenceImpl implements EventPersistence {
                 .onErrorReturn(ConditionalCheckFailedException.class, false);
     }
 
-    /**
-     * Decodes the client cursor; it must belong to a page of the same status (a cursor of another listing would be
-     * rejected by DynamoDB as an invalid start key).
-     */
     private static Map<String, AttributeValue> startKey(EventStatusEnum status, String cursor) {
         Map<String, AttributeValue> startKey = CursorCodec.decode(cursor, STATUS_INDEX_KEY);
         if (!startKey.isEmpty() && !status.name().equals(startKey.get("status").s())) {

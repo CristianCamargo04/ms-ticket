@@ -18,54 +18,23 @@ import com.ticketing.persistence.InventoryTransactionPersistence;
 import com.ticketing.persistence.OrderPersistence;
 import java.time.Clock;
 import java.time.Instant;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
-/**
- * Cancels an order at its owner's request (idempotent).
- *
- * <ul>
- *     <li>{@code QUEUED}: conditional {@code QUEUED -> CANCELLED} (nothing is held yet).</li>
- *     <li>{@code ACTIVE} with {@code RESERVED} tickets: release transaction back to the inventory.</li>
- *     <li>Already {@code CANCELLED}: returned as is.</li>
- *     <li>Anything else (pending payment, sold, expired, ...): {@link InvalidOrderStateException}.</li>
- * </ul>
- *
- * <p>When the conditional write loses a race (e.g. the worker reserved the queued order meanwhile) the order is
- * reloaded and the decision is taken again on its current state, at most {@value #MAX_REEVALUATIONS} times.
- */
+@RequiredArgsConstructor
+@Slf4j
 @Service
 public class CancelOrderUseCaseImpl implements CancelOrderUseCase {
-
-    /** How many times a cancellation lost to a concurrent change is re-evaluated on the reloaded order. */
     static final int MAX_REEVALUATIONS = 2;
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(CancelOrderUseCaseImpl.class);
     private static final String REASON = TransitionReasonEnum.CUSTOMER_CANCELLATION.name();
 
     private final OrderPersistence orderPersistence;
     private final InventoryTransactionPersistence inventoryTransactionPersistence;
     private final Clock clock;
 
-    /**
-     * Creates the use case.
-     *
-     * @param orderPersistence                orders table
-     * @param inventoryTransactionPersistence inventory transactions
-     * @param clock                           time source
-     */
-    public CancelOrderUseCaseImpl(OrderPersistence orderPersistence,
-                                  InventoryTransactionPersistence inventoryTransactionPersistence, Clock clock) {
-        this.orderPersistence = orderPersistence;
-        this.inventoryTransactionPersistence = inventoryTransactionPersistence;
-        this.clock = clock;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public Mono<OrderData> execute(CancelOrderRequest request) {
         return Mono.defer(() -> orderPersistence.findById(request.orderId()))
@@ -93,7 +62,7 @@ public class CancelOrderUseCaseImpl implements CancelOrderUseCase {
                             TransitionReasonEnum.CUSTOMER_CANCELLATION, now, customerId)))
                     .flatMap(outcome -> switch (outcome) {
                         case Applied(OrderData released) -> {
-                            LOGGER.info("Order {} cancelled, {} tickets released", released.orderId(),
+                            log.info("Order {} cancelled, {} tickets released", released.orderId(),
                                     released.quantity());
                             yield Mono.just(released);
                         }
@@ -112,7 +81,7 @@ public class CancelOrderUseCaseImpl implements CancelOrderUseCase {
     }
 
     private Mono<OrderData> cancelled(String orderId) {
-        LOGGER.info("Queued order {} cancelled", orderId);
+        log.info("Queued order {} cancelled", orderId);
         return reload(orderId);
     }
 
@@ -121,7 +90,7 @@ public class CancelOrderUseCaseImpl implements CancelOrderUseCase {
             return Mono.error(new InventoryConflictException(
                     "Order " + orderId + " keeps changing concurrently, retry the cancellation"));
         }
-        LOGGER.debug("Order {} changed during its cancellation, re-evaluating", orderId);
+        log.debug("Order {} changed during its cancellation, re-evaluating", orderId);
         return reload(orderId).flatMap(current -> cancel(current, customerId, reevaluationsLeft - 1));
     }
 

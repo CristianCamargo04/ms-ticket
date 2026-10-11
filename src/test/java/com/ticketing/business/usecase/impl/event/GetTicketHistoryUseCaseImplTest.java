@@ -19,7 +19,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class GetTicketHistoryUseCaseImplTest {
-
     private static final String TICKET_ID = "T-000001";
 
     @Mock

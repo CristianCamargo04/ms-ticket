@@ -32,13 +32,8 @@ import org.testcontainers.utility.DockerImageName;
 import reactor.test.StepVerifier;
 import tools.jackson.databind.json.JsonMapper;
 
-/**
- * Drives the payment client against a real HTTP gateway (WireMock container), with the web client, settings and
- * circuit breaker built by the production configuration classes and wired by Spring.
- */
 @Testcontainers
 class PaymentGatewayChargeClientImplIT {
-
     private static final Duration VERIFY_TIMEOUT = Duration.ofSeconds(20);
     private static final int WIREMOCK_PORT = 8080;
     private static final PaymentChargeRequest REQUEST = new PaymentChargeRequest("order-ok", "order-ok", "customer-1",

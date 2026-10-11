@@ -14,30 +14,20 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-/**
- * Creates an event in {@code PUBLISHING}, pre-generates all of its tickets and puts it {@code ON_SALE}.
- *
- * <p>The tickets are written in {@link EventPolicy#ticketWriteConcurrency()} contiguous slices in parallel (each slice
- * is one {@link TicketPersistence#saveAll(Flux)} call, chunked into batch writes by the persistence layer). The event
- * only goes on sale once every ticket is persisted, so a failed generation leaves an event that never accepts orders
- * (it stays {@code PUBLISHING}).
- */
+@RequiredArgsConstructor
+@Slf4j
 @Service
 public class CreateEventUseCaseImpl implements CreateEventUseCase {
-
-    /** Maximum length of the name and the venue. */
     static final int MAX_TEXT_LENGTH = 120;
 
-    /** Maximum decimals of the ticket price. */
     static final int MAX_PRICE_SCALE = 2;
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(CreateEventUseCaseImpl.class);
     private static final Pattern CURRENCY = Pattern.compile("^[A-Z]{3}$");
 
     private final EventPersistence eventPersistence;
@@ -45,25 +35,6 @@ public class CreateEventUseCaseImpl implements CreateEventUseCase {
     private final EventPolicy eventPolicy;
     private final Clock clock;
 
-    /**
-     * Creates the use case.
-     *
-     * @param eventPersistence  events table
-     * @param ticketPersistence tickets table
-     * @param eventPolicy       event rules (maximum capacity, ticket write concurrency)
-     * @param clock             time source
-     */
-    public CreateEventUseCaseImpl(EventPersistence eventPersistence, TicketPersistence ticketPersistence,
-                                  EventPolicy eventPolicy, Clock clock) {
-        this.eventPersistence = eventPersistence;
-        this.ticketPersistence = ticketPersistence;
-        this.eventPolicy = eventPolicy;
-        this.clock = clock;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public Mono<EventData> execute(CreateEventRequest request) {
         return Mono.defer(() -> {
@@ -103,7 +74,7 @@ public class CreateEventUseCaseImpl implements CreateEventUseCase {
                         return Mono.error(new IllegalStateException(
                                 "Event " + event.eventId() + " left PUBLISHING before going on sale"));
                     }
-                    LOGGER.info("Event {} created with {} tickets and put on sale", event.eventId(),
+                    log.info("Event {} created with {} tickets and put on sale", event.eventId(),
                             event.totalCapacity());
                     return Mono.just(event.withStatus(EventStatusEnum.ON_SALE, now));
                 });

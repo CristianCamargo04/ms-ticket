@@ -23,7 +23,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class ListEventsUseCaseImplTest {
-
     @Mock
     private EventPersistence eventPersistence;
 

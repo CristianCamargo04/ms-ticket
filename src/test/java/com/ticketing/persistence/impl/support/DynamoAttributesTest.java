@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 class DynamoAttributesTest {
-
     private static final Instant INSTANT = Instant.parse("2026-10-10T12:00:00.123Z");
 
     @Test

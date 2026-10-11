@@ -25,31 +25,14 @@ import com.ticketing.persistence.OrderPersistence;
 import com.ticketing.util.ReactiveRetryUtil;
 import java.time.Clock;
 import java.time.Instant;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.RetryBackoffSpec;
 
-/**
- * Confirms a reservation: moves the reserved tickets to {@code PENDING_CONFIRMATION} in one conditional transaction
- * (hold still valid, caller owns the order) and publishes the payment message.
- *
- * <p>Idempotent: an order already pending confirmation republishes its payment message (the gateway charge is
- * idempotent on the order id) and a sold order is returned as is. Once the confirmation deadline of a pending order is
- * due, the payment reconciliation sweeper owns it and nothing is republished (the payment worker would not charge it
- * anyway). An order whose hold was released by the expiration sweeper ({@code EXPIRED} with reason
- * {@code HOLD_EXPIRED}) is reported as {@link ReservationExpiredException}, like a hold that is over but not swept yet,
- * so the answer does not depend on whether the sweeper already ran; any other order that is not active and reserved
- * (including one expired by {@code CONFIRMATION_TIMEOUT}) is an {@link InvalidOrderStateException}. When the
- * transaction loses a race (concurrent confirmation, hold expiration sweeper, cancellation) the order is reloaded to
- * report the winner's outcome. A payment message that cannot be published is only logged: the order stays pending, the
- * customer may confirm again and the payment reconciliation sweeper settles it after its confirmation deadline.
- */
+@Slf4j
 @Service
 public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(ConfirmOrderUseCaseImpl.class);
 
     private final OrderPersistence orderPersistence;
     private final InventoryTransactionPersistence inventoryTransactionPersistence;
@@ -58,16 +41,6 @@ public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
     private final RetryBackoffSpec publishRetry;
     private final Clock clock;
 
-    /**
-     * Creates the use case.
-     *
-     * @param orderPersistence                orders table
-     * @param inventoryTransactionPersistence inventory transactions
-     * @param sqsOrderQueueClient             order queues
-     * @param orderPolicy                     order rules (confirmation deadline)
-     * @param publishRetryPolicy              retries of the payment message publication
-     * @param clock                           time source
-     */
     public ConfirmOrderUseCaseImpl(OrderPersistence orderPersistence,
                                    InventoryTransactionPersistence inventoryTransactionPersistence,
                                    SqsOrderQueueClient sqsOrderQueueClient, OrderPolicy orderPolicy,
@@ -82,9 +55,6 @@ public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
         this.clock = clock;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public Mono<OrderData> execute(ConfirmOrderRequest request) {
         return Mono.defer(() -> orderPersistence.findById(request.orderId()))
@@ -99,7 +69,7 @@ public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
 
     private Mono<OrderData> alreadyConfirmed(OrderData order, ConfirmOrderRequest request) {
         if (order.deadlineAt() != null && !clock.instant().isBefore(order.deadlineAt())) {
-            LOGGER.debug("Order {} is past its confirmation deadline, the payment reconciliation settles it",
+            log.debug("Order {} is past its confirmation deadline, the payment reconciliation settles it",
                     order.orderId());
             return Mono.just(order);
         }
@@ -123,7 +93,7 @@ public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
                         orderPolicy.confirmationDeadline(now), now, request.customerId())))
                 .flatMap(outcome -> switch (outcome) {
                     case Applied(OrderData confirmed) -> {
-                        LOGGER.info("Order {} confirmed, payment requested", confirmed.orderId());
+                        log.info("Order {} confirmed, payment requested", confirmed.orderId());
                         yield publishPayment(confirmed, request).thenReturn(confirmed);
                     }
                     case OrderStateChanged _ -> reload(order.orderId())
@@ -150,10 +120,6 @@ public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
                 + current.processingStatus() + " with tickets " + current.ticketStatus() + " and cannot be confirmed"));
     }
 
-    /**
-     * Whether the expiration sweeper released the hold of the order: the release transaction requires
-     * {@code holdExpiresAt <= now}, so the hold is over even if this instance's clock is slightly behind.
-     */
     private static boolean isReleasedOnHoldExpiry(OrderData order) {
         return order.processingStatus() == OrderProcessingStatusEnum.EXPIRED
                 && TransitionReasonEnum.HOLD_EXPIRED.name().equals(order.reason());
@@ -169,11 +135,11 @@ public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
                         order.orderId(), request.paymentToken(), correlationIdOrOrderId(request.correlationId(), order),
                         clock.instant())))
                 .retryWhen(publishRetry)
-                .doOnNext(messageId -> LOGGER.debug("Payment message {} published for order {}", messageId,
+                .doOnNext(messageId -> log.debug("Payment message {} published for order {}", messageId,
                         order.orderId()))
                 .then()
                 .onErrorResume(error -> {
-                    LOGGER.warn("Payment message of order {} not published, it stays pending confirmation until a"
+                    log.warn("Payment message of order {} not published, it stays pending confirmation until a"
                             + " new confirmation or the payment reconciliation: {}", order.orderId(), error.toString());
                     return Mono.empty();
                 });

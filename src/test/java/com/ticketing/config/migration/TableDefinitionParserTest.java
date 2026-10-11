@@ -27,7 +27,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class TableDefinitionParserTest {
-
     private static final AwsProperties.Tables TABLES = new AwsProperties.Tables("p-events", "p-tickets", "p-orders",
             "p-transitions", "p-locks", "p-migrations");
     private static final JsonMapper JSON = JsonMapper.builder().build();

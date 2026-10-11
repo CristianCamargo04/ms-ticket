@@ -12,7 +12,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class TicketDataTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
 
     @Test

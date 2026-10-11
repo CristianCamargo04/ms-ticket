@@ -31,7 +31,6 @@ import reactor.test.StepVerifier;
 import tools.jackson.databind.json.JsonMapper;
 
 class RateLimitWebFilterTest {
-
     private static final String ORDERS = "/api/v1/events/e-1/orders";
 
     private final MutableClock clock = new MutableClock(Instant.parse("2026-10-10T10:00:00Z"));
@@ -39,7 +38,6 @@ class RateLimitWebFilterTest {
     private final ProblemDetailResponseWriter writer = new ProblemDetailResponseWriter(JsonMapper.builder().build());
     private final CountingChain chain = new CountingChain();
 
-    /** A clock the test can move forward. */
     private static final class MutableClock extends Clock {
         private Instant instant;
 
@@ -67,7 +65,6 @@ class RateLimitWebFilterTest {
         }
     }
 
-    /** Counts the requests that reached the rest of the chain. */
     private static final class CountingChain implements WebFilterChain {
         private final AtomicInteger calls = new AtomicInteger();
 

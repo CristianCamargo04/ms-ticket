@@ -15,7 +15,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class ReservationExpirationSchedulerControllerImplTest {
-
     @Mock
     private ReleaseExpiredReservationsUseCase releaseExpiredReservationsUseCase;
 

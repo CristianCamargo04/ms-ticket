@@ -12,17 +12,8 @@ import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 import reactor.util.context.Context;
 
-/**
- * Assigns a correlation id to every request (first filter of the chain). A valid incoming
- * {@value RequestContext#CORRELATION_ID_HEADER} header is kept; a missing or invalid one (it could carry log-injection
- * payloads) is replaced by a random UUID. The id is written back on the request header (read by the controllers),
- * stored as the exchange attribute and Reactor context key {@value RequestContext#CORRELATION_ID_KEY}, and echoed in
- * the response.
- */
 @Component
 public class CorrelationIdWebFilter implements WebFilter, Ordered {
-
-    /** Accepted incoming correlation ids. */
     public static final Pattern CORRELATION_ID_PATTERN = Pattern.compile("^[A-Za-z0-9-]{1,64}$");
 
     @Override
@@ -44,12 +35,6 @@ public class CorrelationIdWebFilter implements WebFilter, Ordered {
         return Ordered.HIGHEST_PRECEDENCE;
     }
 
-    /**
-     * Keeps a valid incoming id or generates a new one.
-     *
-     * @param incoming the incoming header value, nullable
-     * @return the correlation id of the request
-     */
     static String resolve(String incoming) {
         return incoming != null && CORRELATION_ID_PATTERN.matcher(incoming).matches()
                 ? incoming

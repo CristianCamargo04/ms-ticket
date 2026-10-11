@@ -7,7 +7,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class PaymentGatewaySettingsTest {
-
     @Test
     void shouldExposeSettings() {
         PaymentGatewaySettings settings = new PaymentGatewaySettings(Duration.ofSeconds(3), 2, Duration.ofMillis(100));

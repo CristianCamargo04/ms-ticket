@@ -7,7 +7,6 @@ import com.ticketing.util.HashUtil;
 import org.junit.jupiter.api.Test;
 
 class RequestFingerprintCalculatorTest {
-
     private final RequestFingerprintCalculator calculator = new RequestFingerprintCalculator();
 
     @Test

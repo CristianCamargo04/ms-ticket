@@ -14,7 +14,6 @@ import org.springframework.core.type.AnnotatedTypeMetadata;
 import org.springframework.mock.env.MockEnvironment;
 
 class WorkerModeConditionTest {
-
     private final WorkerModeCondition condition = new WorkerModeCondition();
 
     @ParameterizedTest(name = "runtime-mode {0} -> worker enabled: {1}")

@@ -19,7 +19,6 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 class TicketStateMachineTest {
-
     static Stream<Arguments> everyStatusPair() {
         return Arrays.stream(TicketStatusEnum.values())
                 .flatMap(from -> Arrays.stream(TicketStatusEnum.values()).map(to -> Arguments.of(from, to)));

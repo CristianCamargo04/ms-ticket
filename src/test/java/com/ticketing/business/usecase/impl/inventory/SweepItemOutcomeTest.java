@@ -8,7 +8,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 class SweepItemOutcomeTest {
-
     private static final SweepResult START = new SweepResult(true, 1, 2, 3, 4);
 
     @ParameterizedTest(name = "{0}")

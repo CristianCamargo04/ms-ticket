@@ -17,12 +17,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.stream.IntStream;
 
-/**
- * Deterministic data shared by the use-case tests: a fixed clock, the default policies of the application and events
- * / orders in typical states.
- */
 public final class BusinessFixtures {
-
     public static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
     public static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
 
@@ -35,26 +30,20 @@ public final class BusinessFixtures {
     public static final BigDecimal PRICE = new BigDecimal("25.50");
     public static final String CURRENCY = "USD";
 
-    /** Default order rules: hold 10m, confirmation 5m, republish 30s, 10 per order, 40 complimentary, factor 3. */
     public static final OrderPolicy ORDER_POLICY = new OrderPolicy(Duration.ofMinutes(10), Duration.ofMinutes(5),
             Duration.ofSeconds(30), 10, 40, 3);
 
-    /** Default event rules: capacity 20000, stream every second, 4 parallel ticket writers. */
     public static final EventPolicy EVENT_POLICY = new EventPolicy(20_000, Duration.ofSeconds(1), 4);
 
-    /** Default sweeper settings: lease 30s, batch 100, concurrency 8. */
     public static final SweeperPolicy SWEEPER_POLICY = new SweeperPolicy(Duration.ofSeconds(30), 100, 8,
             "instance-1");
 
-    /** Default inventory retries: 6 retries, 25ms..1s, jitter 0.5. */
     public static final RetryPolicy INVENTORY_RETRY_POLICY = new RetryPolicy(6, Duration.ofMillis(25),
             Duration.ofSeconds(1), 0.5);
 
-    /** Default publish retries: 3 retries, 100ms..1s, jitter 0.5. */
     public static final RetryPolicy PUBLISH_RETRY_POLICY = new RetryPolicy(3, Duration.ofMillis(100),
             Duration.ofSeconds(1), 0.5);
 
-    /** Upper bound of the total backoff of the default policies (virtual time is advanced by this much). */
     public static final Duration RETRY_HORIZON = Duration.ofSeconds(30);
 
     private BusinessFixtures() {

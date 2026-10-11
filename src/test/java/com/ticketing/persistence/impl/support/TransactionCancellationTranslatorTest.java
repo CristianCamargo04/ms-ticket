@@ -32,11 +32,7 @@ import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledExcepti
 import software.amazon.awssdk.services.dynamodb.model.TransactionConflictException;
 import software.amazon.awssdk.services.dynamodb.model.TransactionInProgressException;
 
-/**
- * Layout for two tickets: [0] event, [1..2] tickets, [3] order, [4..5] audit records.
- */
 class TransactionCancellationTranslatorTest {
-
     private static final int TICKETS = 2;
     private static final String NONE = "None";
     private static final String FAILED = TransactionCancellationTranslator.CONDITIONAL_CHECK_FAILED;
@@ -116,7 +112,6 @@ class TransactionCancellationTranslatorTest {
                 .verify();
     }
 
-    /** A reason without {@code Code} (null) must not crash the translation with a {@link NullPointerException}. */
     @Test
     void shouldTreatReasonsWithoutCodeAsNoReason() {
         TransactionCanceledException canceled = TransactionCanceledException.builder()
@@ -183,7 +178,6 @@ class TransactionCancellationTranslatorTest {
                 .verify();
     }
 
-    /** A misconfiguration must surface as itself, never as a retryable inventory conflict. */
     @Test
     void shouldPropagateNonTransientClientFailuresUnchanged() {
         SdkClientException credentials = SdkClientException.create(
@@ -195,10 +189,6 @@ class TransactionCancellationTranslatorTest {
                 .verify();
     }
 
-    /**
-     * The client request token is stable per command, so a reused token with other parameters is a programming error
-     * reported as is (not retried).
-     */
     @Test
     void shouldPropagateIdempotentParameterMismatchesUnchanged() {
         IdempotentParameterMismatchException mismatch = IdempotentParameterMismatchException.builder()

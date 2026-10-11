@@ -26,7 +26,6 @@ import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 
 @ExtendWith(MockitoExtension.class)
 class QueryPaginatorTest {
-
     private static final QueryRequest REQUEST = QueryRequest.builder().tableName("t").limit(2).build();
     private static final Map<String, AttributeValue> LAST_KEY = Map.of("id", AttributeValue.fromS("2"));
 

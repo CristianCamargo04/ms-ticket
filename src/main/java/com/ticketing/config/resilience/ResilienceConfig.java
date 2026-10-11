@@ -6,24 +6,13 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.micrometer.tagged.TaggedCircuitBreakerMetrics;
 import java.time.Duration;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/**
- * Circuit breakers of the outbound calls (resilience4j) and their Micrometer metrics.
- *
- * <p>{@link TaggedCircuitBreakerMetrics} is a {@code MeterBinder} bean, so Spring Boot binds it to every meter
- * registry: each circuit breaker of the registry (including ones added later) publishes
- * {@code resilience4j.circuitbreaker.state}, {@code .calls}, {@code .failure.rate}, {@code .slow.call.rate},
- * {@code .buffered.calls} and {@code .not.permitted.calls}, tagged with {@code name} (e.g. {@value #PAYMENT_GATEWAY}).
- * An open payment circuit is therefore visible in Prometheus / CloudWatch instead of only in the logs.
- */
+@Slf4j
 @Configuration(proxyBeanMethods = false)
 public class ResilienceConfig {
-
-    /** Name of the payment gateway circuit breaker (metrics, logs). */
     public static final String PAYMENT_GATEWAY = "paymentGateway";
 
     static final float FAILURE_RATE_THRESHOLD = 50.0f;
@@ -31,37 +20,16 @@ public class ResilienceConfig {
     static final Duration WAIT_DURATION_IN_OPEN_STATE = Duration.ofSeconds(30);
     static final int PERMITTED_CALLS_IN_HALF_OPEN_STATE = 5;
 
-    private static final Logger log = LoggerFactory.getLogger(ResilienceConfig.class);
-
-    /**
-     * Registry of the application circuit breakers.
-     *
-     * @return the registry
-     */
     @Bean
     public CircuitBreakerRegistry circuitBreakerRegistry() {
         return CircuitBreakerRegistry.ofDefaults();
     }
 
-    /**
-     * Micrometer binding of every circuit breaker of the registry (picked up by Spring Boot as a {@code MeterBinder}).
-     *
-     * @param registry the circuit breaker registry
-     * @return the meter binder
-     */
     @Bean
     public TaggedCircuitBreakerMetrics circuitBreakerMetrics(CircuitBreakerRegistry registry) {
         return TaggedCircuitBreakerMetrics.ofCircuitBreakerRegistry(registry);
     }
 
-    /**
-     * Circuit breaker of the payment gateway: opens when at least half of the last 20 calls failed, stays open
-     * 30 s, then lets 5 trial calls through. Only transient failures (5xx, timeouts, I/O errors) count as failures;
-     * a 4xx answer proves the gateway is up and counts as a success. State transitions are logged.
-     *
-     * @param registry the circuit breaker registry
-     * @return the circuit breaker named {@value #PAYMENT_GATEWAY}
-     */
     @Bean
     public CircuitBreaker paymentGatewayCircuitBreaker(CircuitBreakerRegistry registry) {
         CircuitBreaker circuitBreaker = registry.circuitBreaker(PAYMENT_GATEWAY, paymentGatewayCircuitBreakerConfig());
@@ -70,11 +38,6 @@ public class ResilienceConfig {
         return circuitBreaker;
     }
 
-    /**
-     * Configuration of the payment gateway circuit breaker.
-     *
-     * @return the configuration
-     */
     static CircuitBreakerConfig paymentGatewayCircuitBreakerConfig() {
         return CircuitBreakerConfig.custom()
                 .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)

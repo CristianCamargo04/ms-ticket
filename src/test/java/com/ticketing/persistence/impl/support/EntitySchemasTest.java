@@ -11,11 +11,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.enhanced.dynamodb.TableMetadata;
 
-/**
- * The entities define the attribute names of implementation spec 6.1; these tests pin them.
- */
 class EntitySchemasTest {
-
     @Test
     void shouldDescribeTheEventsTable() {
         TableMetadata metadata = EntitySchemas.EVENT.tableMetadata();

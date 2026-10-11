@@ -23,7 +23,6 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 
 class MigrationChangelogReaderTest {
-
     private static final String CHANGELOG = "classpath:changelog.yaml";
     private static final String TABLE_JSON = "{\n  \"TableName\": \"events\"\n}\n";
 

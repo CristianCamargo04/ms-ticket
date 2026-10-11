@@ -27,22 +27,14 @@ import reactor.core.scheduler.Schedulers;
 import software.amazon.awssdk.services.sqs.SqsAsyncClient;
 import software.amazon.awssdk.services.sqs.model.Message;
 
-/**
- * Runs the {@link SqsListenerContainer} against a real SQS API (LocalStack 4.9): acknowledgement, redelivery with
- * an exponential visibility backoff and an increasing receive count, dead-lettering through the redrive policy, and
- * graceful shutdown.
- */
 @Testcontainers
 class SqsListenerContainerIT {
-
     private static final int MAX_RECEIVE_COUNT = 2;
     private static final int VISIBILITY_TIMEOUT_SECONDS = 5;
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
-    /** Allowance for the timer granularity of LocalStack when asserting the redelivery delays. */
     private static final Duration TIMING_TOLERANCE = Duration.ofMillis(500);
 
-    /** Short polls and backoffs: a failed message becomes visible again after 2^n x 1s (2s, then 4s). */
     private static final SqsListenerSettings SETTINGS = new SqsListenerSettings(10, 1, VISIBILITY_TIMEOUT_SECONDS, 4,
             2, Duration.ofSeconds(1), Duration.ofSeconds(4), Duration.ofMillis(200), Duration.ofSeconds(1),
             Duration.ofSeconds(10));
@@ -93,7 +85,7 @@ class SqsListenerContainerIT {
         await().atMost(TIMEOUT).until(() -> outcomes(MessageOutcome.ACKED) == 1.0);
         assertThat(handled).containsExactly("order-1|corr-it-1");
         await().atMost(TIMEOUT).until(() -> LocalStackSqsSupport.pendingMessages(sqs, queue.url()) == 0);
-        // deleted, so never redelivered after the visibility timeout
+
         await().during(Duration.ofSeconds(VISIBILITY_TIMEOUT_SECONDS + 1)).atMost(TIMEOUT)
                 .until(() -> handled.size() == 1);
         assertThat(LocalStackSqsSupport.receive(sqs, queue.dlqUrl())).isEmpty();
@@ -120,8 +112,7 @@ class SqsListenerContainerIT {
         });
         assertThat(deadLettered).extracting(Message::body).containsExactly("poison-pill");
         assertThat(receiveCounts).containsExactly(1, 2);
-        // SQS honours the exponential ChangeMessageVisibility: the second delivery comes redeliveryDelay(1) after the
-        // first, and the last allowed delivery keeps its backoff too (redeliveryDelay(2)) before the move to the DLQ
+
         assertThat(Duration.ofNanos(deliveredAt.get(1) - deliveredAt.get(0)))
                 .isGreaterThanOrEqualTo(SETTINGS.redeliveryDelay(1).minus(TIMING_TOLERANCE));
         assertThat(Duration.ofNanos(deadLetteredAt.get() - deliveredAt.get(1)))

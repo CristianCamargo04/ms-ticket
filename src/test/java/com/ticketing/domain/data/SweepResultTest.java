@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import org.junit.jupiter.api.Test;
 
 class SweepResultTest {
-
     @Test
     void shouldCreateSkippedResult() {
         assertThat(SweepResult.skipped()).isEqualTo(new SweepResult(false, 0, 0, 0, 0));

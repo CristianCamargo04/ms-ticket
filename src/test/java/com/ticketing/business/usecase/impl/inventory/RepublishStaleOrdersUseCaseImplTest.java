@@ -43,7 +43,6 @@ import reactor.test.publisher.PublisherProbe;
 
 @ExtendWith(MockitoExtension.class)
 class RepublishStaleOrdersUseCaseImplTest {
-
     private static final String LOCK = RepublishStaleOrdersUseCaseImpl.LOCK_NAME;
     private static final String OWNER = SWEEPER_POLICY.instanceId();
 

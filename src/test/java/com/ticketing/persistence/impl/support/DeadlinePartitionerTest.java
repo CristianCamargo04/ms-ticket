@@ -7,7 +7,6 @@ import com.ticketing.enums.DeadlineTypeEnum;
 import org.junit.jupiter.api.Test;
 
 class DeadlinePartitionerTest {
-
     private final DeadlinePartitioner partitioner =
             new DeadlinePartitioner(new DynamoDbTableNames("e", "t", "o", "tt", "l", 8));
 

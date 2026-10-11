@@ -41,7 +41,6 @@ import reactor.test.StepVerifier;
 @WebFluxTest(controllers = AvailabilityRestControllerImpl.class)
 @Import(RestControllerTestConfig.class)
 class AvailabilityRestControllerImplTest {
-
     private static final Instant FIRST = Instant.parse("2026-10-10T10:00:00Z");
     private static final Instant SECOND = Instant.parse("2026-10-10T10:00:01Z");
     private static final ParameterizedTypeReference<ServerSentEvent<AvailabilityResponseDto>> SSE_TYPE =
@@ -64,7 +63,6 @@ class AvailabilityRestControllerImplTest {
         return new AvailabilitySnapshot("e-1", 100, available, 3, 2, 100 - available - 5, 0, capturedAt);
     }
 
-    /** A controller outside the web layer, for subscription-level assertions on the stream. */
     private AvailabilityRestControllerImpl controller() {
         return new AvailabilityRestControllerImpl(getEventAvailabilityUseCase, streamEventAvailabilityUseCase,
                 new AvailabilityDtoMapper());

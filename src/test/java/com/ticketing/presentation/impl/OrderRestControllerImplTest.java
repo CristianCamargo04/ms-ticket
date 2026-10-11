@@ -57,7 +57,6 @@ import reactor.core.publisher.Mono;
 @WebFluxTest(controllers = OrderRestControllerImpl.class)
 @Import(RestControllerTestConfig.class)
 class OrderRestControllerImplTest {
-
     private static final Instant NOW = RestControllerTestConfig.NOW;
     private static final String KEY = "6f1c2a9e-0b7d-4c55-9a51-3f2b8e4d7c10";
     private static final String ORDER_ID = "0b1f6d2c-8a43-5e7f-9c21-4d5e6f708192";

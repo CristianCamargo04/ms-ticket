@@ -34,7 +34,6 @@ import reactor.core.publisher.Mono;
 @WebFluxTest(controllers = ComplimentaryRestControllerImpl.class)
 @Import(RestControllerTestConfig.class)
 class ComplimentaryRestControllerImplTest {
-
     private static final String KEY = "comp-2026-10-10-0001";
     private static final String ORDER_ID = "7a0c3b8e-1d2f-5a4b-8c6d-9e0f1a2b3c4d";
     private static final String URI = "/api/v1/events/e-1/complimentary-tickets";

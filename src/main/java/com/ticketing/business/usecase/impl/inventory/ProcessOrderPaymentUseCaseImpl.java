@@ -12,17 +12,17 @@ import com.ticketing.domain.exception.TicketingException;
 import com.ticketing.domain.external_request.payment.PaymentChargeRequest;
 import com.ticketing.domain.internal_request.ProcessOrderPaymentRequest;
 import com.ticketing.domain.inventory.FinalizeSaleCommand;
-import com.ticketing.domain.inventory.InventoryWriteOutcome;
 import com.ticketing.domain.inventory.InventoryWriteOutcome.Applied;
 import com.ticketing.domain.inventory.InventoryWriteOutcome.InsufficientInventory;
 import com.ticketing.domain.inventory.InventoryWriteOutcome.OrderStateChanged;
 import com.ticketing.domain.inventory.InventoryWriteOutcome.StaleTicketSelection;
+import com.ticketing.domain.inventory.InventoryWriteOutcome;
 import com.ticketing.domain.inventory.ReleaseInventoryCommand;
 import com.ticketing.domain.inventory.RetryPolicy;
-import com.ticketing.domain.order.PaymentOutcome;
 import com.ticketing.domain.order.PaymentOutcome.Approved;
 import com.ticketing.domain.order.PaymentOutcome.Declined;
 import com.ticketing.domain.order.PaymentOutcome.NotFound;
+import com.ticketing.domain.order.PaymentOutcome;
 import com.ticketing.enums.OrderProcessingStatusEnum;
 import com.ticketing.enums.TicketStatusEnum;
 import com.ticketing.enums.TransitionReasonEnum;
@@ -33,33 +33,15 @@ import com.ticketing.util.ReactiveRetryUtil;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.function.Supplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.RetryBackoffSpec;
 
-/**
- * Charges an order pending confirmation and settles it; SQS consumer, idempotent under at-least-once delivery.
- *
- * <p>The charge uses the order id as gateway idempotency key, so redeliveries never charge twice. An approved charge
- * finalizes the sale ({@code PENDING_CONFIRMATION -> SOLD}); a declined one releases the tickets. The settlement write
- * is retried locally on transient conflicts (the money is already captured, so it must not wait for a redelivery);
- * gateway errors propagate so that SQS redelivers the message.
- *
- * <p>No charge is <em>started</em> once the confirmation deadline of the order ({@link OrderData#deadlineAt()}) is
- * due: from that instant the payment reconciliation sweeper owns the order (it looks the charge up and finalizes or
- * releases it), so a message redelivered late, e.g. after a gateway outage, is acknowledged without charging. Only a
- * charge started before the deadline and completing after the sweeper's lookup can still meet a released order: then
- * an ERROR is logged for a manual refund (documented limitation).
- */
+@Slf4j
 @Service
 public class ProcessOrderPaymentUseCaseImpl implements ProcessOrderPaymentUseCase {
-
-    /** Actor recorded in the audit trail. */
     static final String ACTOR = "payment-worker";
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(ProcessOrderPaymentUseCaseImpl.class);
 
     private final OrderPersistence orderPersistence;
     private final EventPersistence eventPersistence;
@@ -68,16 +50,6 @@ public class ProcessOrderPaymentUseCaseImpl implements ProcessOrderPaymentUseCas
     private final RetryBackoffSpec inventoryRetry;
     private final Clock clock;
 
-    /**
-     * Creates the use case.
-     *
-     * @param orderPersistence                orders table
-     * @param eventPersistence                events table (ticket price and currency)
-     * @param inventoryTransactionPersistence inventory transactions
-     * @param paymentGatewayChargeApi         payment gateway
-     * @param inventoryRetryPolicy            retries of transient inventory conflicts
-     * @param clock                           time source
-     */
     public ProcessOrderPaymentUseCaseImpl(OrderPersistence orderPersistence, EventPersistence eventPersistence,
                                           InventoryTransactionPersistence inventoryTransactionPersistence,
                                           PaymentGatewayChargeApi paymentGatewayChargeApi,
@@ -92,21 +64,18 @@ public class ProcessOrderPaymentUseCaseImpl implements ProcessOrderPaymentUseCas
         this.clock = clock;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public Mono<OrderData> execute(ProcessOrderPaymentRequest request) {
         String orderId = request.orderId();
         return reload(orderId)
                 .flatMap(order -> {
                     if (order.ticketStatus() != TicketStatusEnum.PENDING_CONFIRMATION) {
-                        LOGGER.debug("Order {} is not pending confirmation ({}), duplicate delivery ignored", orderId,
+                        log.debug("Order {} is not pending confirmation ({}), duplicate delivery ignored", orderId,
                                 order.ticketStatus());
                         return Mono.just(order);
                     }
                     if (isConfirmationDeadlineDue(order, clock.instant())) {
-                        LOGGER.warn("Order {} reached its confirmation deadline before being charged, the payment"
+                        log.warn("Order {} reached its confirmation deadline before being charged, the payment"
                                 + " reconciliation settles it", orderId);
                         return Mono.just(order);
                     }
@@ -117,10 +86,6 @@ public class ProcessOrderPaymentUseCaseImpl implements ProcessOrderPaymentUseCas
                 });
     }
 
-    /**
-     * Whether the payment reconciliation sweeper owns the order, i.e. its confirmation deadline is due at {@code now}
-     * (same boundary as the deadline index query {@code deadlineAt <= now}).
-     */
     private static boolean isConfirmationDeadlineDue(OrderData order, Instant now) {
         return order.deadlineAt() != null && !now.isBefore(order.deadlineAt());
     }
@@ -152,13 +117,13 @@ public class ProcessOrderPaymentUseCaseImpl implements ProcessOrderPaymentUseCas
     private Mono<OrderData> afterWrite(OrderData order, InventoryWriteOutcome outcome, boolean approved) {
         return switch (outcome) {
             case Applied(OrderData settled) -> {
-                LOGGER.info("Order {} payment {}: tickets {}", settled.orderId(), approved ? "approved" : "declined",
+                log.info("Order {} payment {}: tickets {}", settled.orderId(), approved ? "approved" : "declined",
                         settled.ticketStatus());
                 yield Mono.just(settled);
             }
             case OrderStateChanged _ -> reload(order.orderId()).doOnNext(current -> {
                 if (approved && current.ticketStatus() != TicketStatusEnum.SOLD) {
-                    LOGGER.error("Payment captured for released order {} (status {}): manual refund required",
+                    log.error("Payment captured for released order {} (status {}): manual refund required",
                             current.orderId(), current.processingStatus());
                 }
             });

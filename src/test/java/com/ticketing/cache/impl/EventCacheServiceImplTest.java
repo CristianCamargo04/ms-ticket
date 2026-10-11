@@ -23,15 +23,12 @@ import reactor.test.StepVerifier;
 import reactor.util.context.Context;
 
 class EventCacheServiceImplTest {
-
-    /** Reactor context key under which the web filter stores the correlation id. */
     private static final String CORRELATION_ID_KEY = "correlationId";
     private static final Instant NOW = Instant.parse("2026-10-10T12:00:00Z");
     private static final Duration TTL = Duration.ofSeconds(2);
     private static final EventData EVENT = event("e-1");
     private static final Executor SAME_THREAD = Runnable::run;
 
-    /** Manually advanced time source: expiration is deterministic, no sleeping. */
     private final AtomicLong nanos = new AtomicLong();
     private final Ticker ticker = nanos::get;
     private final AtomicInteger loads = new AtomicInteger();

@@ -11,7 +11,6 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class IdempotencyKeyResolverTest {
-
     private final IdempotencyKeyResolver resolver = new IdempotencyKeyResolver();
 
     @ParameterizedTest

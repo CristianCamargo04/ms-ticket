@@ -24,7 +24,6 @@ import software.amazon.awssdk.services.sqs.SqsAsyncClient;
 import software.amazon.awssdk.services.sqs.SqsServiceClientConfiguration;
 
 class AwsClientConfigTest {
-
     private static final URI DYNAMODB_LOCAL = URI.create("http://localhost:8000");
     private static final URI LOCALSTACK = URI.create("http://localhost:4566");
 

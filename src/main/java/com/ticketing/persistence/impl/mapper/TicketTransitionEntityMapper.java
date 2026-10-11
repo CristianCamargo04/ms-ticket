@@ -13,33 +13,14 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-/**
- * Converts {@link TicketTransitionData} to and from the {@code ticket-transitions} item: partition key
- * {@code <eventId>#<ticketId>}, sort key {@code <epochMillis 13-digit zero-padded>#<transitionId>} (chronological
- * order; the transition id is recovered from the sort key).
- */
 @Component
 public class TicketTransitionEntityMapper {
-
     private static final String TRANSITION_KEY_FORMAT = "%013d#%s";
 
-    /**
-     * Partition key of the history of a ticket.
-     *
-     * @param eventId  the event identifier
-     * @param ticketId the ticket identifier
-     * @return {@code <eventId>#<ticketId>}
-     */
     public static String ticketKey(String eventId, String ticketId) {
         return eventId + "#" + ticketId;
     }
 
-    /**
-     * Domain to entity.
-     *
-     * @param transition the transition
-     * @return the entity
-     */
     public TicketTransitionEntity toEntity(TicketTransitionData transition) {
         TicketTransitionEntity entity = new TicketTransitionEntity();
         entity.setTicketKey(ticketKey(transition.eventId(), transition.ticketId()));
@@ -56,13 +37,6 @@ public class TicketTransitionEntityMapper {
         return entity;
     }
 
-    /**
-     * Entity to domain.
-     *
-     * @param entity the entity
-     * @return the transition
-     * @throws IllegalStateException when a mandatory attribute is missing or the sort key is malformed
-     */
     public TicketTransitionData toDomain(TicketTransitionEntity entity) {
         String transitionKey = required(entity.getTransitionKey(), "transitionKey");
         int separator = transitionKey.indexOf('#');
@@ -81,22 +55,10 @@ public class TicketTransitionEntityMapper {
                 toInstant(entity.getOccurredAt()));
     }
 
-    /**
-     * Domain to low-level item.
-     *
-     * @param transition the transition
-     * @return the item
-     */
     public Map<String, AttributeValue> toItem(TicketTransitionData transition) {
         return EntitySchemas.TICKET_TRANSITION.itemToMap(toEntity(transition), true);
     }
 
-    /**
-     * Low-level item to domain.
-     *
-     * @param item the item
-     * @return the transition
-     */
     public TicketTransitionData fromItem(Map<String, AttributeValue> item) {
         return toDomain(EntitySchemas.TICKET_TRANSITION.mapToItem(item));
     }

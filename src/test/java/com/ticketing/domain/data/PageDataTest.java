@@ -9,7 +9,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class PageDataTest {
-
     @Test
     void shouldHaveMoreWhenNextCursorIsPresent() {
         assertThat(new PageData<>(List.of("a"), "cursor").hasMore()).isTrue();

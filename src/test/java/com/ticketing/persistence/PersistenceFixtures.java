@@ -12,11 +12,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * Shared unit-test data of the persistence layer.
- */
 public final class PersistenceFixtures {
-
     public static final Instant NOW = Instant.parse("2026-10-10T12:00:00.123Z");
     public static final Instant EVENT_DATE = Instant.parse("2026-12-31T21:00:00Z");
     public static final String EVENT_ID = "8d0f6f0a-1111-4c3e-9a55-000000000001";

@@ -23,11 +23,9 @@ import reactor.test.StepVerifier;
 import software.amazon.awssdk.services.sqs.SqsAsyncClient;
 
 class SqsListenerConfigTest {
-
     private final OrderReservationSqsController reservationController = mock(OrderReservationSqsController.class);
     private final OrderPaymentSqsController paymentController = mock(OrderPaymentSqsController.class);
 
-    /** Every SQS call stays pending, like a queue that is not reachable yet. */
     private final SqsAsyncClient sqsAsyncClient =
             mock(SqsAsyncClient.class, invocation -> new CompletableFuture<>());
 

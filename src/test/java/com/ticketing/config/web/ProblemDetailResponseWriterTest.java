@@ -17,7 +17,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class ProblemDetailResponseWriterTest {
-
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final ProblemDetailResponseWriter writer = new ProblemDetailResponseWriter(JSON);

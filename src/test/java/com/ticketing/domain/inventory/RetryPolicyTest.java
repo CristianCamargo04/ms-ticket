@@ -8,7 +8,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class RetryPolicyTest {
-
     private static final Duration MIN = Duration.ofMillis(25);
     private static final Duration MAX = Duration.ofSeconds(1);
 

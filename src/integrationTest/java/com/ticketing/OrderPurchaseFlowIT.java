@@ -40,29 +40,18 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
-/**
- * The whole purchase flow through the real application, in process: HTTP API (real JWT decoder), DynamoDB Local,
- * LocalStack SQS and the in-process workers ({@code ticketing.runtime-mode=all}: SQS consumers and sweepers), with a
- * stub payment gateway. Nothing is mocked inside the application.
- *
- * <p>Timings are shortened so that expiry is observable: holds last {@value #HOLD_TTL_SECONDS} s and the sweepers run
- * every second. Everything asynchronous is awaited with Awaitility (polling the public API), never with sleeps. The
- * {@code ci} profile is active, so the console logs are ECS JSON: the correlation id is asserted on log lines of both
- * the HTTP path and the SQS consumer.
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
     "ticketing.runtime-mode=all",
     "ticketing.migrations.enabled=true",
     "ticketing.orders.hold-ttl=" + OrderPurchaseFlowIT.HOLD_TTL_SECONDS + "s",
     "ticketing.sweeper.interval=1s",
-    // enough retries to ride out the transaction conflicts of the sold-out race within one delivery
+
     "ticketing.retry.inventory.max-attempts=20",
     "management.endpoints.web.exposure.include=health,info,prometheus"})
 @ActiveProfiles("ci")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @ExtendWith(OutputCaptureExtension.class)
 class OrderPurchaseFlowIT {
-
     static final int HOLD_TTL_SECONDS = 6;
 
     private static final Duration ASYNC_TIMEOUT = Duration.ofSeconds(90);
@@ -87,7 +76,6 @@ class OrderPurchaseFlowIT {
         ENVIRONMENT.register(registry);
     }
 
-    /** Replaces the default AWS credentials chain (factory method of the {@link TestBean} above). */
     static AwsCredentialsProvider awsCredentialsProvider() {
         return EndToEndEnvironment.dummyCredentials();
     }
@@ -98,10 +86,6 @@ class OrderPurchaseFlowIT {
         api = WebTestClient.bindToServer().baseUrl(baseUrl).responseTimeout(HTTP_TIMEOUT).build();
         reactiveApi = WebClient.create(baseUrl);
     }
-
-    // ------------------------------------------------------------------------------------------------------------
-    // Scenarios
-    // ------------------------------------------------------------------------------------------------------------
 
     @Test
     void shouldSellTicketsThroughReservationConfirmationAndPayment(CapturedOutput output) {
@@ -132,13 +116,11 @@ class OrderPurchaseFlowIT {
                     .containsExactly("RESERVED", "PENDING_CONFIRMATION", "SOLD");
         }
 
-        // the worker charged the gateway once, keyed by the order id, with the configured API key
         assertThat(chargesOf(accepted.orderId())).singleElement().satisfies(charge -> {
             assertThat(charge.idempotencyKey()).isEqualTo(accepted.orderId());
             assertThat(charge.authorization()).isEqualTo("Bearer " + EndToEndEnvironment.PAYMENT_API_KEY);
         });
 
-        // structured (ECS) log lines of the HTTP request and of both SQS consumers carry the correlation id
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(logLinesWith(output, correlationId))
                 .anySatisfy(line -> assertThat(line).contains("queued for event"))
                 .anySatisfy(line -> assertThat(line).contains("holds tickets"))
@@ -186,7 +168,6 @@ class OrderPurchaseFlowIT {
             long rejectedAtTheDoor = placements.stream().filter(PlacementResult::soldOut).count();
             assertThat(accepted.size() + rejectedAtTheDoor).isEqualTo(buyers);
 
-            // every accepted order leaves the queue: reserved or rejected
             Map<String, OrderView> outcomes = await().atMost(ASYNC_TIMEOUT).pollInterval(Duration.ofMillis(200))
                     .until(() -> accepted.stream()
                                     .map(placement -> order(placement.orderId(), placement.customer()))
@@ -207,7 +188,7 @@ class OrderPurchaseFlowIT {
                 assertThat(order.reason()).isEqualTo("SOLD_OUT");
                 assertThat(order.status()).isEqualTo("AVAILABLE");
             });
-            // the five holds may already be expiring (short TTL): the books must balance either way
+
             assertThat(availability(eventId).total()).isEqualTo(capacity);
         } finally {
             sampler.dispose();
@@ -229,7 +210,6 @@ class OrderPurchaseFlowIT {
         OrderView reserved = awaitOrder(accepted.orderId(), customer, order -> "RESERVED".equals(order.status()));
         assertThat(availability(eventId)).isEqualTo(new Counters(3, 1, 2, 0, 0, 0));
 
-        // nobody confirms: the expiration sweeper (every second) releases the hold once it is over
         OrderView expired = awaitOrder(accepted.orderId(), customer,
                 order -> "EXPIRED".equals(order.processingStatus()));
         assertThat(Instant.now()).isAfterOrEqualTo(reserved.holdExpiresAt());
@@ -242,7 +222,6 @@ class OrderPurchaseFlowIT {
             assertThat(history.getLast().reason()).isEqualTo("HOLD_EXPIRED");
         }
 
-        // a late confirmation is refused: the hold is gone
         confirm(accepted.orderId(), customer, PaymentGatewayStub.APPROVED_PREFIX, null)
                 .expectStatus().isEqualTo(HttpStatus.GONE)
                 .expectBody().jsonPath("$.errorCode").isEqualTo("HOLD_EXPIRED");
@@ -264,7 +243,6 @@ class OrderPurchaseFlowIT {
                 .expectHeader().contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .expectBody().jsonPath("$.errorCode").isEqualTo("IDEMPOTENCY_KEY_REUSED");
 
-        // the same key of another customer is another order
         OrderAccepted otherCustomer = placeOrder(eventId, uniqueCustomer(), 1, key, null);
         assertThat(otherCustomer.orderId()).isNotEqualTo(first.orderId());
 
@@ -284,10 +262,6 @@ class OrderPurchaseFlowIT {
 
         assertThat(metrics).containsPattern("resilience4j_circuitbreaker_state\\{[^}]*name=\"paymentGateway\"");
     }
-
-    // ------------------------------------------------------------------------------------------------------------
-    // API helpers
-    // ------------------------------------------------------------------------------------------------------------
 
     private String createEvent(int capacity) {
         Map<String, Object> body = Map.of(
@@ -420,10 +394,6 @@ class OrderPurchaseFlowIT {
         return UUID.randomUUID().toString();
     }
 
-    // ------------------------------------------------------------------------------------------------------------
-    // Views of the API responses (unknown properties are ignored)
-    // ------------------------------------------------------------------------------------------------------------
-
     record EventView(String eventId, String status, int availableTickets) {
     }
 
@@ -432,7 +402,6 @@ class OrderPurchaseFlowIT {
 
     record OrderView(String orderId, String status, String processingStatus, String reason, List<String> ticketIds,
                      Instant holdExpiresAt) {
-
         OrderView {
             ticketIds = ticketIds == null ? List.of() : List.copyOf(ticketIds);
         }
@@ -443,7 +412,6 @@ class OrderPurchaseFlowIT {
 
     record Counters(int totalCapacity, int available, int reserved, int pendingConfirmation, int sold,
                     int complimentary) {
-
         int total() {
             return available + reserved + pendingConfirmation + sold + complimentary;
         }
@@ -453,7 +421,6 @@ class OrderPurchaseFlowIT {
     }
 
     record PlacementResult(String customer, int status, String orderId, String errorCode) {
-
         boolean accepted() {
             return status == HttpStatus.ACCEPTED.value();
         }

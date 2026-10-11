@@ -16,7 +16,6 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class ConfirmInventoryCommandTest {
-
     private static final Instant DEADLINE = NOW.plusSeconds(300);
 
     @Test

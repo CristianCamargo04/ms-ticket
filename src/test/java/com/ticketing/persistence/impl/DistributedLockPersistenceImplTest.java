@@ -29,7 +29,6 @@ import software.amazon.awssdk.services.dynamodb.model.PutItemResponse;
 
 @ExtendWith(MockitoExtension.class)
 class DistributedLockPersistenceImplTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T12:00:00.250Z");
     private static final Duration LEASE = Duration.ofSeconds(30);
 

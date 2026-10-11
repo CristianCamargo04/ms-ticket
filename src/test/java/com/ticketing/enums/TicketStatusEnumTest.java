@@ -10,7 +10,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class TicketStatusEnumTest {
-
     @ParameterizedTest(name = "{0} -> {1} allowed={2}")
     @CsvSource({
             "AVAILABLE,            AVAILABLE,            false",

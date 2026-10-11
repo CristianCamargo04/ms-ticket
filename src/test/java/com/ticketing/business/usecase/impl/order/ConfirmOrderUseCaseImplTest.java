@@ -56,7 +56,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class ConfirmOrderUseCaseImplTest {
-
     private static final String PAYMENT_TOKEN = "tok_visa_1";
     private static final ConfirmOrderRequest REQUEST =
             new ConfirmOrderRequest(ORDER_ID, CUSTOMER_ID, PAYMENT_TOKEN, CORRELATION_ID);

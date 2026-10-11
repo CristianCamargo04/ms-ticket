@@ -10,7 +10,6 @@ import org.springframework.http.codec.ServerCodecConfigurer;
 import org.springframework.http.codec.json.JacksonJsonDecoder;
 
 class WebFluxConfigTest {
-
     @Test
     void shouldLimitTheBufferedRequestBodySize() {
         ServerCodecConfigurer configurer = ServerCodecConfigurer.create();

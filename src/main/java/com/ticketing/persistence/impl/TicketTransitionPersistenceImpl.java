@@ -13,24 +13,12 @@ import reactor.core.publisher.Flux;
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
 
-/**
- * Read adapter of the {@code ticket-transitions} audit table. The sort key starts with the zero-padded epoch millis
- * of the transition, so a forward query returns the history in chronological order.
- */
 @Repository
 public class TicketTransitionPersistenceImpl implements TicketTransitionPersistence {
-
     private final DynamoDbAsyncClient dynamoDb;
     private final String tableName;
     private final TicketTransitionEntityMapper mapper;
 
-    /**
-     * Creates the adapter.
-     *
-     * @param dynamoDb   low-level client
-     * @param tableNames physical table names
-     * @param mapper     transition mapper
-     */
     public TicketTransitionPersistenceImpl(DynamoDbAsyncClient dynamoDb, DynamoDbTableNames tableNames,
                                            TicketTransitionEntityMapper mapper) {
         this.dynamoDb = dynamoDb;

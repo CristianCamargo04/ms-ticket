@@ -9,8 +9,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -41,35 +40,12 @@ import software.amazon.awssdk.services.dynamodb.model.TimeToLiveSpecification;
 import software.amazon.awssdk.services.dynamodb.model.TimeToLiveStatus;
 import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveRequest;
 
-/**
- * Applies the pending DynamoDB migrations at startup (local and ci profiles only; in AWS, Terraform owns the schema).
- * Implementation spec 6.4.
- *
- * <p>Algorithm, idempotent and safe to run from several instances at once:
- * <ol>
- *     <li>create the {@code schema-migrations} history table if needed (the runner owns it, it is not a
- *     migration);</li>
- *     <li>read the applied migrations and fail fast if the checksum of any of them differs from its file (an
- *     applied migration must never be edited: add a new one);</li>
- *     <li>for every pending migration, in changelog order: create the table (an existing table is skipped), wait
- *     until the table and its indexes are {@code ACTIVE}, converge the time to live to the one the file declares
- *     (whether this run created the table or not, see {@code ensureTimeToLive}), and only then record the
- *     migration with its checksum (a conditional put: a concurrent runner that recorded it first must have
- *     recorded the same checksum).</li>
- * </ol>
- * The algorithm is reactive ({@link #migrate()}); {@link #afterSingletonsInstantiated()} blocks on it once, before
- * the HTTP server and the queue listeners start, which is the only blocking call allowed in the application
- * (configuration code at startup).
- */
+@Slf4j
 public class DynamoMigrationRunner implements SmartInitializingSingleton {
-
     static final String MIGRATION_ID = "migrationId";
     static final String CHECKSUM = "checksum";
     static final String APPLIED_AT = "appliedAt";
 
-    private static final Logger log = LoggerFactory.getLogger(DynamoMigrationRunner.class);
-
-    /** Time-to-live statuses meaning "enabled" (an enabling TTL needs no further request). */
     private static final Set<TimeToLiveStatus> ACTIVE_TIME_TO_LIVE =
             EnumSet.of(TimeToLiveStatus.ENABLED, TimeToLiveStatus.ENABLING);
 
@@ -82,33 +58,12 @@ public class DynamoMigrationRunner implements SmartInitializingSingleton {
     private final int maxPolls;
     private final Duration startupTimeout;
 
-    /**
-     * Creates a runner polling table status every 500 ms (at most 2 minutes per table) and giving up after 5 minutes.
-     *
-     * @param dynamoDb              low-level client
-     * @param changelogReader       reads the migrations
-     * @param tableDefinitionParser converts migration files into requests
-     * @param historyTable          physical name of the {@code schema-migrations} table
-     * @param clock                 source of {@code appliedAt}
-     */
     public DynamoMigrationRunner(DynamoDbAsyncClient dynamoDb, MigrationChangelogReader changelogReader,
                                  TableDefinitionParser tableDefinitionParser, String historyTable, Clock clock) {
         this(dynamoDb, changelogReader, tableDefinitionParser, historyTable, clock, Duration.ofMillis(500), 240,
                 Duration.ofMinutes(5));
     }
 
-    /**
-     * Creates a runner with explicit polling settings.
-     *
-     * @param dynamoDb              low-level client
-     * @param changelogReader       reads the migrations
-     * @param tableDefinitionParser converts migration files into requests
-     * @param historyTable          physical name of the {@code schema-migrations} table
-     * @param clock                 source of {@code appliedAt}
-     * @param pollInterval          delay between two table status checks
-     * @param maxPolls              status checks before giving up on a table
-     * @param startupTimeout        maximum duration of the whole run at startup
-     */
     DynamoMigrationRunner(DynamoDbAsyncClient dynamoDb, MigrationChangelogReader changelogReader,
                           TableDefinitionParser tableDefinitionParser, String historyTable, Clock clock,
                           Duration pollInterval, int maxPolls, Duration startupTimeout) {
@@ -122,22 +77,12 @@ public class DynamoMigrationRunner implements SmartInitializingSingleton {
         this.startupTimeout = Objects.requireNonNull(startupTimeout, "startupTimeout");
     }
 
-    /**
-     * Applies the pending migrations once every singleton exists and before the lifecycle beans (web server, queue
-     * listeners, sweepers) start. A failure aborts the application startup.
-     */
     @Override
     public void afterSingletonsInstantiated() {
         List<String> applied = Objects.requireNonNullElse(migrate().block(startupTimeout), List.of());
         log.info("DynamoDB schema is up to date ({} migration(s) applied by this run)", applied.size());
     }
 
-    /**
-     * Applies the pending migrations.
-     *
-     * @return the ids of the migrations applied by this run, in order; error signal on an invalid changelog, a
-     *         checksum mismatch or a DynamoDB failure
-     */
     public Mono<List<String>> migrate() {
         return Mono.fromCallable(changelogReader::read)
                 .flatMap(migrations -> ensureHistoryTable()
@@ -205,9 +150,6 @@ public class DynamoMigrationRunner implements SmartInitializingSingleton {
                 .doOnNext(id -> log.info("Applied DynamoDB migration {} ({})", id, migration.file()));
     }
 
-    /**
-     * Creates a table; a table that already exists (or is being created by another runner) is skipped.
-     */
     private Mono<Void> createTable(CreateTableRequest request) {
         return Mono.fromFuture(() -> dynamoDb.createTable(request))
                 .then()
@@ -236,19 +178,6 @@ public class DynamoMigrationRunner implements SmartInitializingSingleton {
                 && table.globalSecondaryIndexes().stream().allMatch(index -> index.indexStatus() == IndexStatus.ACTIVE);
     }
 
-    /**
-     * Converges the time to live of a table to the declared specification. It does not depend on who created the
-     * table: a previous run may have crashed between {@code CreateTable} and {@code UpdateTimeToLive}, or the table
-     * may already exist, and the migration must still not be recorded before its time to live is in place.
-     * {@code DescribeTimeToLive} decides: nothing to do when it already matches ({@code ENABLING} counts as enabled),
-     * {@code UpdateTimeToLive} when it does not, and a fail-fast error when another attribute is enabled (DynamoDB
-     * allows one TTL attribute per table, so the declared one could never be applied). When the update fails because
-     * a concurrent runner changed it first, the status is read again and accepted if it now matches.
-     *
-     * @param tableName physical table name
-     * @param wanted    declared specification, {@code null} when the file declares none
-     * @return completion, or an error signal
-     */
     private Mono<Void> ensureTimeToLive(String tableName, TimeToLiveSpecification wanted) {
         if (wanted == null) {
             return Mono.empty();
@@ -340,19 +269,15 @@ public class DynamoMigrationRunner implements SmartInitializingSingleton {
                 + migration.checksum() + ". Applied migrations must never change; add a new migration instead.");
     }
 
-    /** Outcome of comparing the current time to live of a table with the declared one. */
     private enum TimeToLiveState {
-        /** Already as declared. */
         CONVERGED,
-        /** Needs an {@code UpdateTimeToLive}. */
+
         PENDING,
-        /** Enabled on another attribute: cannot be converged automatically. */
+
         CONFLICT
     }
 
-    /** Signals that a table (or one of its indexes) is still being created; retried by the status polling. */
     private static final class TableNotActiveException extends RuntimeException {
-
         TableNotActiveException(String tableName) {
             super("DynamoDB table " + tableName + " is not ACTIVE yet", null, false, false);
         }

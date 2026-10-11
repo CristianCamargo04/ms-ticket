@@ -15,28 +15,11 @@ import java.time.Clock;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
-/**
- * Accepts an administrative complimentary issue: the order belongs to the beneficiary, its id is derived from the
- * issuing administrator and the idempotency key, and it is queued like a purchase (see {@link QueuedOrderAdmission})
- * without the soft availability check; the order worker issues the tickets.
- */
 @Service
 public class IssueComplimentaryTicketsUseCaseImpl implements IssueComplimentaryTicketsUseCase {
-
     private final QueuedOrderAdmission admission;
     private final OrderPolicy orderPolicy;
 
-    /**
-     * Creates the use case.
-     *
-     * @param orderPersistence    orders table
-     * @param eventPersistence    events table (cache loader)
-     * @param eventCacheService   event cache
-     * @param sqsOrderQueueClient order queues
-     * @param orderPolicy         order rules
-     * @param publishRetryPolicy  retries of the reservation message publication
-     * @param clock               time source
-     */
     public IssueComplimentaryTicketsUseCaseImpl(OrderPersistence orderPersistence, EventPersistence eventPersistence,
                                                 EventCacheService eventCacheService,
                                                 SqsOrderQueueClient sqsOrderQueueClient, OrderPolicy orderPolicy,
@@ -46,9 +29,6 @@ public class IssueComplimentaryTicketsUseCaseImpl implements IssueComplimentaryT
         this.orderPolicy = orderPolicy;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public Mono<OrderData> execute(IssueComplimentaryRequest request) {
         return Mono.defer(() -> {

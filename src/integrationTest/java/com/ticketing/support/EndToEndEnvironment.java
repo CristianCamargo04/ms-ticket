@@ -15,25 +15,9 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sqs.SqsAsyncClient;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 
-/**
- * Everything an in-process instance of the whole application needs, started once per test class (test code:
- * blocking {@code join()} is fine here):
- *
- * <ul>
- *   <li>DynamoDB Local ({@code amazon/dynamodb-local:3.3.1}, shared per JVM) with <b>unique table names</b>: the
- *       application creates them itself through its migration runner ({@code ticketing.migrations.enabled=true});</li>
- *   <li>LocalStack 4.9 SQS with unique {@code order-reservation} / {@code order-payment} queues, each with its
- *       dead-letter queue and redrive policy ({@code maxReceiveCount=5}, like {@code init-sqs.sh});</li>
- *   <li>the {@link PaymentGatewayStub} (charges + JWK set) and the {@link TestJwtIssuer}.</li>
- * </ul>
- * Containers are reaped by Testcontainers when the JVM exits.
- */
 public final class EndToEndEnvironment {
-
-    /** Pinned: {@code latest} requires a paid auth token. */
     public static final DockerImageName LOCALSTACK_IMAGE = DockerImageName.parse("localstack/localstack:4.9");
 
-    /** API key the application must send to the payment gateway. */
     public static final String PAYMENT_API_KEY = "e2e-payment-api-key";
 
     private static final int MAX_RECEIVE_COUNT = 5;
@@ -61,31 +45,14 @@ public final class EndToEndEnvironment {
         this.paymentGateway = PaymentGatewayStub.start(issuer.jwkSetJson());
     }
 
-    /**
-     * Starts the containers, creates the queues and starts the stubs.
-     *
-     * @return the running environment
-     */
     public static EndToEndEnvironment start() {
         return new EndToEndEnvironment();
     }
 
-    /**
-     * Dummy AWS credentials for DynamoDB Local and LocalStack (they accept any key), so the application's default
-     * credentials chain never reaches a developer's real AWS profile.
-     *
-     * @return static dummy credentials
-     */
     public static AwsCredentialsProvider dummyCredentials() {
         return StaticCredentialsProvider.create(AwsBasicCredentials.create(DUMMY_CREDENTIAL, DUMMY_CREDENTIAL));
     }
 
-    /**
-     * Points the application at the environment: endpoints, unique table and queue names, payment gateway (with its
-     * API key) and JWT issuer ({@code cognito:groups} roles, {@code aud} or {@code client_id} audience).
-     *
-     * @param registry the dynamic properties of the test context
-     */
     public void register(DynamicPropertyRegistry registry) {
         registry.add("aws.region", localStack::getRegion);
         registry.add("aws.endpoint-override.dynamodb-endpoint", () -> DynamoDbLocalContainer.endpoint().toString());
@@ -107,30 +74,14 @@ public final class EndToEndEnvironment {
         registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", () -> paymentGateway.baseUrl() + "/jwks");
     }
 
-    /**
-     * The token issuer trusted by the application.
-     *
-     * @return the issuer
-     */
     public TestJwtIssuer issuer() {
         return issuer;
     }
 
-    /**
-     * The payment gateway stub.
-     *
-     * @return the stub
-     */
     public PaymentGatewayStub paymentGateway() {
         return paymentGateway;
     }
 
-    /**
-     * Visible plus in-flight messages of a dead-letter queue of the environment.
-     *
-     * @param queueName the source queue name (its DLQ is {@code <name>-dlq})
-     * @return the number of dead letters
-     */
     public int deadLetters(String queueName) {
         try (SqsAsyncClient sqs = sqsClient()) {
             String url = sqs.getQueueUrl(request -> request.queueName(queueName + "-dlq")).join().queueUrl();
@@ -143,20 +94,10 @@ public final class EndToEndEnvironment {
         }
     }
 
-    /**
-     * Name of the order-reservation queue.
-     *
-     * @return the queue name
-     */
     public String reservationQueue() {
         return reservationQueue;
     }
 
-    /**
-     * Name of the order-payment queue.
-     *
-     * @return the queue name
-     */
     public String paymentQueue() {
         return paymentQueue;
     }

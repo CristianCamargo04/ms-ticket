@@ -8,7 +8,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class DynamoDbTableNamesTest {
-
     @Test
     void shouldExposeConfiguredNames() {
         DynamoDbTableNames names = new DynamoDbTableNames("e", "t", "o", "tt", "l", 8);

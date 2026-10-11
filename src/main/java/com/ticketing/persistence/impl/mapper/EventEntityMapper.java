@@ -13,19 +13,8 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-/**
- * Converts {@link EventData} to and from the {@code events} item: instants as epoch millis, price as a plain decimal
- * string, enums by name.
- */
 @Component
 public class EventEntityMapper {
-
-    /**
-     * Domain to entity.
-     *
-     * @param event the event
-     * @return the entity
-     */
     public EventEntity toEntity(EventData event) {
         EventEntity entity = new EventEntity();
         entity.setEventId(event.eventId());
@@ -47,13 +36,6 @@ public class EventEntityMapper {
         return entity;
     }
 
-    /**
-     * Entity to domain.
-     *
-     * @param entity the entity
-     * @return the event
-     * @throws IllegalStateException when a mandatory attribute is missing
-     */
     public EventData toDomain(EventEntity entity) {
         return new EventData(
                 entity.getEventId(),
@@ -74,22 +56,10 @@ public class EventEntityMapper {
                 toInstant(entity.getUpdatedAt()));
     }
 
-    /**
-     * Domain to low-level item.
-     *
-     * @param event the event
-     * @return the item (no null attributes)
-     */
     public Map<String, AttributeValue> toItem(EventData event) {
         return EntitySchemas.EVENT.itemToMap(toEntity(event), true);
     }
 
-    /**
-     * Low-level item to domain.
-     *
-     * @param item the item
-     * @return the event
-     */
     public EventData fromItem(Map<String, AttributeValue> item) {
         return toDomain(EntitySchemas.EVENT.mapToItem(item));
     }

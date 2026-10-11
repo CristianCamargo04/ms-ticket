@@ -69,7 +69,6 @@ import software.amazon.awssdk.utils.builder.SdkBuilder;
 
 @ExtendWith(MockitoExtension.class)
 class DynamoMigrationRunnerTest {
-
     private static final AwsProperties.Tables TABLES = new AwsProperties.Tables("p-events", "p-tickets", "p-orders",
             "p-transitions", "p-locks", "p-migrations");
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-10T12:00:00Z"), ZoneOffset.UTC);
@@ -194,10 +193,6 @@ class DynamoMigrationRunnerTest {
         verify(dynamoDb, times(5)).putItem(any(PutItemRequest.class));
     }
 
-    /**
-     * A previous run crashed between {@code CreateTable} and {@code UpdateTimeToLive} (or the table was created
-     * outside the runner): the time to live must still be enabled, and before the migration is recorded.
-     */
     @Test
     void shouldEnableTheTimeToLiveOfAnExistingTableBeforeRecordingItsMigration() {
         when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(alreadyExists());
@@ -289,7 +284,6 @@ class DynamoMigrationRunnerTest {
         verify(dynamoDb, times(4)).putItem(any(PutItemRequest.class));
     }
 
-    /** A declared {@code "Enabled": false} converges the other way: an enabled TTL is disabled, a disabled one kept. */
     @ParameterizedTest
     @CsvSource({"ENABLED, 1", "ENABLING, 1", "DISABLED, 0", "DISABLING, 0"})
     void shouldConvergeADeclaredDisabledTimeToLive(TimeToLiveStatus current, int expectedUpdates) {

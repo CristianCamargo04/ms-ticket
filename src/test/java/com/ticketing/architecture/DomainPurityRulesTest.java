@@ -8,12 +8,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 
 import org.junit.jupiter.api.Test;
 
-/**
- * Keeps {@code domain} and {@code enums} framework-free (implementation spec section 1): no Spring, no Reactor,
- * no AWS SDK, no Jackson, nor any other third-party library.
- */
 class DomainPurityRulesTest {
-
     @Test
     void domainShouldOnlyDependOnJavaDomainAndEnums() {
         classes().that().resideInAPackage(DOMAIN)

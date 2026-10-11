@@ -7,12 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 import reactor.core.publisher.Mono;
 
-/**
- * In-memory {@link DistributedLockPersistence} with the lease semantics of the spec (acquire when free, expired or
- * already owned; release only by the owner).
- */
 public final class InMemoryDistributedLockPersistence implements DistributedLockPersistence {
-
     private final InMemoryTicketingStore store;
     private final Map<String, Lease> leases = new HashMap<>();
 
@@ -40,12 +35,6 @@ public final class InMemoryDistributedLockPersistence implements DistributedLock
         }).then();
     }
 
-    /**
-     * Whether a lease is currently recorded.
-     *
-     * @param lockName the lock name
-     * @return {@code true} when held (expired or not)
-     */
     public boolean isHeld(String lockName) {
         synchronized (store) {
             return leases.containsKey(lockName);

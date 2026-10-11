@@ -18,7 +18,6 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import reactor.test.StepVerifier;
 
 class JwtRoleConverterTest {
-
     private static TicketingProperties properties(Map<String, String> values) {
         return new Binder(new MapConfigurationPropertySource(values)).bindOrCreate("ticketing",
                 TicketingProperties.class);

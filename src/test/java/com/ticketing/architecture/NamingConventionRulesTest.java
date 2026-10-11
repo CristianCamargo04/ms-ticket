@@ -33,13 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
-/**
- * Enforces the class-name suffixes of implementation spec section 1 (item 3). Only top-level classes are
- * checked: nested types (e.g. the records of a sealed outcome or a properties group) may be named freely.
- */
 class NamingConventionRulesTest {
-
-    /** Use-case contracts anywhere in the use-case tree (root or family sub-packages), but never in impl. */
     private static final DescribedPredicate<JavaClass> USE_CASE_CONTRACTS = interfacesIn(USE_CASE_TREE)
             .and(resideOutsideOfPackage(IMPL))
             .as("use-case interfaces in '%s'", USE_CASE_TREE);

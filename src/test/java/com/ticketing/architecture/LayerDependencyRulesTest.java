@@ -14,6 +14,7 @@ import static com.ticketing.architecture.ArchitectureFixtures.PRESENTATION;
 import static com.ticketing.architecture.ArchitectureFixtures.REACTIVE_STREAMS;
 import static com.ticketing.architecture.ArchitectureFixtures.REACTOR;
 import static com.ticketing.architecture.ArchitectureFixtures.SLF4J;
+import static com.ticketing.architecture.ArchitectureFixtures.LOMBOK;
 import static com.ticketing.architecture.ArchitectureFixtures.SPRING_STEREOTYPE;
 import static com.ticketing.architecture.ArchitectureFixtures.USE_CASE_PORTS;
 import static com.ticketing.architecture.ArchitectureFixtures.UTIL;
@@ -28,13 +29,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Qualifier;
 
-/**
- * Enforces the dependency matrix of implementation spec section 1:
- * {@code presentation -> business.usecase (interfaces) -> persistence | client | cache (interfaces) -> domain},
- * with {@code config} as the composition root that nothing else may depend on.
- */
 class LayerDependencyRulesTest {
-
     @Test
     void domainShouldNotDependOnAnyOtherApplicationPackage() {
         noClasses().that().resideInAPackage(DOMAIN)
@@ -56,7 +51,7 @@ class LayerDependencyRulesTest {
     @Test
     void utilShouldOnlyDependOnJavaAndReactor() {
         classes().that().resideInAPackage(UTIL)
-                .should().onlyDependOnClassesThat().resideInAnyPackage(JAVA, REACTOR, REACTIVE_STREAMS, UTIL)
+                .should().onlyDependOnClassesThat().resideInAnyPackage(JAVA, REACTOR, REACTIVE_STREAMS, UTIL, LOMBOK)
                 .because("cross-cutting utilities may only use the JDK and Reactor, never another layer")
                 .allowEmptyShould(true)
                 .check(productionClasses());
@@ -85,9 +80,9 @@ class LayerDependencyRulesTest {
     void businessShouldOnlyUseApprovedThirdPartyLibraries() {
         classes().that().resideInAPackage(BUSINESS)
                 .should().onlyDependOnClassesThat(
-                        resideInAnyPackage(APPLICATION, JAVA, REACTOR, REACTIVE_STREAMS, SPRING_STEREOTYPE, SLF4J)
+                        resideInAnyPackage(APPLICATION, JAVA, REACTOR, REACTIVE_STREAMS, SPRING_STEREOTYPE, SLF4J, LOMBOK)
                                 .or(type(Qualifier.class))
-                                .as("reside in the application, the JDK, Reactor, Spring stereotypes or SLF4J"
+                                .as("reside in the application, the JDK, Reactor, Spring stereotypes, SLF4J or Lombok"
                                         + " (or are @Qualifier)"))
                 .because("use cases must stay free of infrastructure frameworks (AWS SDK, Jackson, Spring Web, ...)")
                 .allowEmptyShould(true)

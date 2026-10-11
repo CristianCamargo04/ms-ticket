@@ -62,13 +62,12 @@ import software.amazon.awssdk.services.dynamodb.model.Update;
 
 @ExtendWith(MockitoExtension.class)
 class InventoryTransactionPersistenceImplTest {
-
     private static final List<String> TICKETS = List.of("T-000007", "T-000003");
     private static final Instant HOLD_EXPIRES_AT = NOW.plus(Duration.ofMinutes(10));
     private static final AttributeValue NOW_MILLIS = millis(NOW);
     private static final AttributeValue ONE = AttributeValue.fromN("1");
     private static final Map<String, String> STATUS_NAME = Map.of("#status", "status");
-    /** What {@code Clock.systemUTC()} returns: finer than the millisecond precision of the stored numbers. */
+
     private static final Instant PRECISE_NOW = Instant.parse("2026-10-10T12:00:00.123456789Z");
     private static final Instant STORED_NOW = Instant.parse("2026-10-10T12:00:00.123Z");
 
@@ -291,10 +290,6 @@ class InventoryTransactionPersistenceImplTest {
                         "sweeper")));
     }
 
-    /**
-     * The applied order is what a later read returns: every instant the transaction writes is stored as epoch
-     * milliseconds, so the in-memory result must not keep the sub-millisecond part of the command instants.
-     */
     @ParameterizedTest(name = "{0}")
     @MethodSource("subMillisecondCommands")
     void shouldReturnTheAppliedOrderWithTheStoragePrecision(InventoryCommand command) {

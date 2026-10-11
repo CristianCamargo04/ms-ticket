@@ -21,7 +21,6 @@ import reactor.test.StepVerifier;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 
 class EventPersistenceImplIT {
-
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
 
     private static PersistenceTestContext context;

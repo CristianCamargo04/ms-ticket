@@ -56,9 +56,8 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class ReserveTicketsUseCaseImplTest {
-
     private static final ReserveTicketsRequest REQUEST = new ReserveTicketsRequest(ORDER_ID, CORRELATION_ID);
-    /** Two tickets with candidate factor 3: windows of six candidates. */
+
     private static final int WINDOW = 2 * ORDER_POLICY.candidateFactor();
 
     @Mock
@@ -84,7 +83,6 @@ class ReserveTicketsUseCaseImplTest {
                 inventoryTransactionPersistence, ORDER_POLICY, INVENTORY_RETRY_POLICY, CLOCK, randomGenerator);
     }
 
-    /** Start at T-000042, then sample candidates #3 and #2 of the remaining ones. */
     private ReserveTicketsUseCaseImpl useCase() {
         return useCase(new ScriptedRandomGenerator(41, 3, 2));
     }

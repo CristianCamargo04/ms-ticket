@@ -31,7 +31,6 @@ import tools.jackson.databind.PropertyNamingStrategies;
 import tools.jackson.databind.json.JsonMapper;
 
 class PaymentGatewayClientConfigTest {
-
     private static final Duration VERIFY_TIMEOUT = Duration.ofSeconds(10);
 
     @StartStop
@@ -44,7 +43,6 @@ class PaymentGatewayClientConfigTest {
     static class PropertiesConfig {
     }
 
-    /** Body decoded by the gateway web client in the tests. */
     record Pong(String paymentId, String status) {
     }
 

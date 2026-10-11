@@ -13,7 +13,6 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 
 class SqsClientConfigTest {
-
     private final SqsClientConfig config = new SqsClientConfig();
 
     @Configuration(proxyBeanMethods = false)

@@ -22,15 +22,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
-/**
- * Production topology of the HTTP servers, on real ports: the actuator runs on its own management server
- * ({@code management.server.port}, 8081 in AWS) and the instance is a worker ({@code ticketing.runtime-mode=worker}).
- *
- * <p>Spring Boot serves the management endpoints from a child context whose HTTP handler collects the
- * {@code WebFilter} beans of the parent context too, so the application's {@code SecurityWebFilterChain} (and the
- * correlation filter) also protect the management server: the health probes and Prometheus stay public there,
- * every other actuator endpoint requires a token, and nothing of the actuator is reachable on the business port.
- */
 @SpringBootTest(classes = SecurityConfigManagementPortTest.ManagementPortApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
@@ -42,7 +33,6 @@ import org.springframework.test.web.reactive.server.WebTestClient;
             "ticketing.security.issuer=https://issuer.example/default",
             "spring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://127.0.0.1:9/jwks"})
 class SecurityConfigManagementPortTest {
-
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     @LocalServerPort
@@ -54,14 +44,12 @@ class SecurityConfigManagementPortTest {
     private WebTestClient business;
     private WebTestClient management;
 
-    /** The security, web and actuator beans of the application, on top of Spring Boot's auto-configuration. */
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
     @EnableConfigurationProperties(TicketingProperties.class)
     @Import({SecurityConfig.class, JwtRoleConverter.class, SecurityProblemHandler.class, ProblemDetailFactory.class,
             ProblemDetailResponseWriter.class, CorrelationIdWebFilter.class, WorkerModeWebConfig.class})
     static class ManagementPortApplication {
-
         @Bean
         Clock clock() {
             return Clock.systemUTC();

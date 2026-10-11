@@ -66,7 +66,6 @@ import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 
 @ExtendWith(MockitoExtension.class)
 class SqsListenerContainerTest {
-
     private static final String QUEUE = "orders";
     private static final String QUEUE_URL = "http://sqs.local/000000000000/orders";
     private static final String REDRIVE_POLICY = "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:0:orders-dlq\","
@@ -217,7 +216,7 @@ class SqsListenerContainerTest {
     @Test
     void shouldKeepTheRedeliveryBackoffOnTheLastAllowedDeliveryAndCountItAsPoison() {
         givenQueue(REDRIVE_POLICY);
-        // m3 exceeds the startup maxReceiveCount (e.g. the redrive policy was raised or removed meanwhile)
+
         givenPolls(batch(message("m1", 2), message("m2", 3), message("m3", 7)));
         givenVisibilityChangeSucceeds();
 
@@ -399,7 +398,7 @@ class SqsListenerContainerTest {
         givenPolls();
 
         start(container(body -> Mono.empty()));
-        // each failure is retried after 1 to 1.5 s, so the 20 failures all happen within the first 30 s
+
         scheduler.advanceTimeBy(Duration.ofSeconds(60));
 
         verify(sqs, times(41)).receiveMessage(any(ReceiveMessageRequest.class));
@@ -431,7 +430,7 @@ class SqsListenerContainerTest {
         scheduler.advanceTimeBy(SqsListenerContainer.SHORT_POLLING_IDLE_DELAY);
 
         assertThat(bodies).containsExactly("body-m1");
-        // a non-empty receive is followed by the next poll right away
+
         ArgumentCaptor<ReceiveMessageRequest> receive = ArgumentCaptor.forClass(ReceiveMessageRequest.class);
         verify(sqs, times(4)).receiveMessage(receive.capture());
         assertThat(receive.getValue().waitTimeSeconds()).isZero();
@@ -826,7 +825,6 @@ class SqsListenerContainerTest {
                 .build();
     }
 
-    /** Scripts the receive calls; once the script is exhausted every call returns a pending (long) poll. */
     @SafeVarargs
     private void givenPolls(CompletableFuture<ReceiveMessageResponse>... polls) {
         for (CompletableFuture<ReceiveMessageResponse> poll : polls) {

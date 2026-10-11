@@ -43,7 +43,6 @@ import software.amazon.awssdk.services.dynamodb.model.WriteRequest;
 
 @ExtendWith(MockitoExtension.class)
 class TicketPersistenceImplTest {
-
     private static final String TABLE = "t-tickets";
 
     @Mock

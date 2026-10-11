@@ -38,13 +38,8 @@ import software.amazon.awssdk.services.sqs.model.QueueDoesNotExistException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/**
- * Publishes real messages to SQS on LocalStack (pinned to 4.9: later versions require an auth token) through a client
- * built by {@link AwsClientConfig} with an endpoint override, then reads them back and checks body and attributes.
- */
 @Testcontainers
 class SqsOrderQueueClientImplIT {
-
     private static final Duration VERIFY_TIMEOUT = Duration.ofSeconds(30);
     private static final Instant OCCURRED_AT = Instant.parse("2026-10-10T12:00:00.250Z");
 
@@ -61,7 +56,6 @@ class SqsOrderQueueClientImplIT {
         sqs = sqsClient(LOCALSTACK.getEndpoint().toString());
     }
 
-    /** An SQS client exactly as the application builds it, pointed at {@code endpoint}. */
     private static SqsAsyncClient sqsClient(String endpoint) {
         AwsProperties properties = new Binder(new MapConfigurationPropertySource(Map.of(
                 "aws.region", LOCALSTACK.getRegion(),
@@ -207,11 +201,6 @@ class SqsOrderQueueClientImplIT {
         assertAttribute(message, "correlationId", "String", correlationId.asString());
     }
 
-    /**
-     * An endpoint that accepts TCP connections (the kernel completes the handshake into the listen backlog) but
-     * never answers: without per-request timeouts the lookup would wait for the client's long-polling defaults
-     * (60 s per call).
-     */
     @Test
     void shouldGiveUpWithinThePublishTimeoutWhenSqsNeverAnswersTheQueueUrlLookup() throws IOException {
         try (ServerSocket silentEndpoint = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());

@@ -5,10 +5,9 @@ import com.ticketing.domain.exception.TicketingException;
 import com.ticketing.enums.ErrorCodeEnum;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Stream;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.codec.DecodingException;
@@ -28,20 +27,12 @@ import org.springframework.web.bind.support.WebExchangeBindException;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.ServerWebInputException;
 
-/**
- * Translates every error raised while handling a request into an RFC 9457 problem
- * ({@code application/problem+json}, see {@link ProblemDetailFactory}). Business exceptions keep their client-safe
- * message and the status of their {@link ErrorCodeEnum}; framework errors (binding, unknown routes, unsupported
- * methods or media types) keep their HTTP status; anything unexpected becomes a generic {@code 500 INTERNAL_ERROR}
- * that never exposes internals (the exception is logged instead).
- */
+@RequiredArgsConstructor
+@Slf4j
 @RestControllerAdvice
 public class GlobalErrorHandler {
-
-    /** Detail of every unexpected server error. */
     static final String INTERNAL_ERROR_DETAIL = "An unexpected error occurred";
 
-    /** {@code Retry-After} value (seconds) of the transient (retryable) business errors. */
     static final String TRANSIENT_RETRY_AFTER_SECONDS = "1";
 
     static final String VALIDATION_DETAIL = "The request is invalid";
@@ -51,33 +42,12 @@ public class GlobalErrorHandler {
     static final String FORBIDDEN_DETAIL = "Access to this resource is denied";
     static final String BEARER_CHALLENGE = "Bearer";
 
-    /** Status of an unknown route; its framework detail ("No static resource ...") is not exposed. */
     private static final int NOT_FOUND = 404;
 
-    /** Client-facing detail of an unknown route. */
     static final String NOT_FOUND_DETAIL = "No resource matches the requested path.";
-
-    private static final Logger log = LoggerFactory.getLogger(GlobalErrorHandler.class);
 
     private final ProblemDetailFactory problems;
 
-    /**
-     * Creates the handler.
-     *
-     * @param problems builds the problem bodies
-     */
-    public GlobalErrorHandler(ProblemDetailFactory problems) {
-        this.problems = Objects.requireNonNull(problems, "problems");
-    }
-
-    /**
-     * Business errors: status of the error code, client-safe message; {@code Retry-After} for rate limiting and for
-     * transient failures.
-     *
-     * @param exception the business exception
-     * @param exchange  the current exchange
-     * @return the problem response
-     */
     @ExceptionHandler(TicketingException.class)
     public ResponseEntity<ProblemDetail> handleTicketingException(TicketingException exception,
                                                                   ServerWebExchange exchange) {
@@ -103,14 +73,6 @@ public class GlobalErrorHandler {
         return respond(problem, headers);
     }
 
-    /**
-     * Bean validation errors of a {@code @Valid} body: {@code 400 VALIDATION_ERROR} listing every violation as
-     * {@code {field, message}} (never the rejected value).
-     *
-     * @param exception the binding exception
-     * @param exchange  the current exchange
-     * @return the problem response
-     */
     @ExceptionHandler(WebExchangeBindException.class)
     public ResponseEntity<ProblemDetail> handleBindException(WebExchangeBindException exception,
                                                              ServerWebExchange exchange) {
@@ -127,14 +89,6 @@ public class GlobalErrorHandler {
         return respond(problem, new HttpHeaders());
     }
 
-    /**
-     * Unreadable input (malformed JSON, missing body or header, request parameter of the wrong type):
-     * {@code 400 VALIDATION_ERROR}.
-     *
-     * @param exception the input exception
-     * @param exchange  the current exchange
-     * @return the problem response
-     */
     @ExceptionHandler(ServerWebInputException.class)
     public ResponseEntity<ProblemDetail> handleInputException(ServerWebInputException exception,
                                                               ServerWebExchange exchange) {
@@ -143,13 +97,6 @@ public class GlobalErrorHandler {
                 exception.getHeaders());
     }
 
-    /**
-     * A request body larger than the configured in-memory limit: {@code 413}.
-     *
-     * @param exception the limit exception
-     * @param exchange  the current exchange
-     * @return the problem response
-     */
     @ExceptionHandler(DataBufferLimitException.class)
     public ResponseEntity<ProblemDetail> handleBodyTooLarge(DataBufferLimitException exception,
                                                             ServerWebExchange exchange) {
@@ -158,14 +105,6 @@ public class GlobalErrorHandler {
                 new HttpHeaders());
     }
 
-    /**
-     * Other framework errors with an HTTP status (unknown route 404, method not allowed 405, not acceptable 406,
-     * unsupported media type 415, ...): their status, client-facing detail and headers (e.g. {@code Allow}).
-     *
-     * @param exception the framework exception
-     * @param exchange  the current exchange
-     * @return the problem response
-     */
     @ExceptionHandler(ErrorResponseException.class)
     public ResponseEntity<ProblemDetail> handleErrorResponse(ErrorResponseException exception,
                                                              ServerWebExchange exchange) {
@@ -182,13 +121,6 @@ public class GlobalErrorHandler {
         return respond(problems.forStatus(status, detail, exchange), exception.getHeaders());
     }
 
-    /**
-     * Missing or invalid credentials detected after the security filter chain: {@code 401 UNAUTHORIZED}.
-     *
-     * @param exception the authentication exception
-     * @param exchange  the current exchange
-     * @return the problem response
-     */
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ProblemDetail> handleAuthenticationException(AuthenticationException exception,
                                                                        ServerWebExchange exchange) {
@@ -198,13 +130,6 @@ public class GlobalErrorHandler {
         return respond(problems.forErrorCode(ErrorCodeEnum.UNAUTHORIZED, UNAUTHORIZED_DETAIL, exchange), headers);
     }
 
-    /**
-     * Authorization failures detected after the security filter chain: {@code 403 FORBIDDEN}.
-     *
-     * @param exception the access-denied exception
-     * @param exchange  the current exchange
-     * @return the problem response
-     */
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ProblemDetail> handleAccessDeniedException(AccessDeniedException exception,
                                                                      ServerWebExchange exchange) {
@@ -213,13 +138,6 @@ public class GlobalErrorHandler {
                 new HttpHeaders());
     }
 
-    /**
-     * Anything else: generic {@code 500 INTERNAL_ERROR}; the exception is logged, never exposed.
-     *
-     * @param exception the unexpected exception
-     * @param exchange  the current exchange
-     * @return the problem response
-     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> handleUnexpectedException(Exception exception, ServerWebExchange exchange) {
         log.error("Unexpected error on {}", describe(exchange), exception);
@@ -227,12 +145,6 @@ public class GlobalErrorHandler {
                 new HttpHeaders());
     }
 
-    /**
-     * Client-safe detail of an input error.
-     *
-     * @param exception the input exception
-     * @return which parameter is invalid, or that the body is malformed, or the framework's own detail
-     */
     static String inputErrorDetail(ServerWebInputException exception) {
         Throwable cause = exception.getCause();
         MethodParameter parameter = exception.getMethodParameter();
@@ -258,14 +170,7 @@ public class GlobalErrorHandler {
                 + " [correlationId=" + ProblemDetailFactory.correlationIdOf(exchange) + "]";
     }
 
-    /**
-     * One violated constraint of a request body.
-     *
-     * @param field   the invalid property (or the object name for class-level constraints)
-     * @param message the constraint message
-     */
     public record FieldViolation(String field, String message) {
-
         static final Comparator<FieldViolation> ORDER = Comparator.comparing(FieldViolation::field)
                 .thenComparing(FieldViolation::message, Comparator.nullsFirst(Comparator.naturalOrder()));
     }

@@ -1,8 +1,5 @@
 package com.ticketing.enums;
 
-/**
- * Stable error codes exposed to clients (ProblemDetail {@code errorCode}) with their HTTP status and retry semantics.
- */
 public enum ErrorCodeEnum {
     VALIDATION_ERROR(400, false),
     INVALID_IDEMPOTENCY_KEY(400, false),
@@ -35,20 +32,10 @@ public enum ErrorCodeEnum {
         this.retryable = retryable;
     }
 
-    /**
-     * HTTP status used when this error reaches a REST client.
-     *
-     * @return the HTTP status code
-     */
     public int httpStatus() {
         return httpStatus;
     }
 
-    /**
-     * Whether the failure is transient and the operation may be retried.
-     *
-     * @return {@code true} for transient failures
-     */
     public boolean retryable() {
         return retryable;
     }

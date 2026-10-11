@@ -39,7 +39,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class IssueComplimentaryTicketsUseCaseImplTest {
-
     private static final String ADMIN_ID = "admin-1";
     private static final String BENEFICIARY_ID = "vip-1";
     private static final String IDEMPOTENCY_KEY = "key-12345678";

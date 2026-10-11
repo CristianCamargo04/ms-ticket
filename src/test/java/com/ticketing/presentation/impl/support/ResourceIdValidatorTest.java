@@ -11,7 +11,6 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class ResourceIdValidatorTest {
-
     @ParameterizedTest
     @ValueSource(strings = {"e-1", "T-000042", "6f1c2a9e-0b7d-4c55-9a1e-2b3c4d5e6f70", "A"})
     void shouldAcceptTheIdentifiersTheServiceIssues(String id) {

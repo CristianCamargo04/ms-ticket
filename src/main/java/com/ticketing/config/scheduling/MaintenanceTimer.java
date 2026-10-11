@@ -7,57 +7,30 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Supplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 
-/**
- * Timer channel of the sweepers: every {@code ticketing.sweeper.interval} it runs the expired-reservation sweeper
- * and then the stale-order dispatch sweeper, sequentially.
- *
- * <p>Pipeline: {@code Flux.interval(interval)} → {@code onBackpressureDrop} → {@code concatMap(runSweeps, 0)}. A tick
- * that fires while the previous run is still in progress is dropped (sweeps never overlap or queue up on one
- * instance; the distributed lease prevents overlaps across instances). Each sweep is bounded by the lease duration
- * — a sweep must not outlive the lease it holds — and its errors are contained: they are logged, counted and the
- * next tick simply runs it again, so the timer never dies. {@link #stop()} disposes the timer; a sweep cancelled
- * mid-run releases its lease reactively and leaves every order consistent (each order transition is one conditional
- * DynamoDB write).
- *
- * <p>Metrics: {@code sweeper.results{type, outcome=completed|skipped|failed}} counts runs ({@code skipped}: another
- * instance held the lease) and {@code sweeper.orders{type, result=released|finalized|republished|failed}} counts
- * the orders handled by completed runs.
- */
+@Slf4j
 public final class MaintenanceTimer implements SmartLifecycle {
-
-    /** Lifecycle phase: started after the web server, stopped (immediately) before its graceful shutdown. */
     public static final int PHASE = SmartLifecycle.DEFAULT_PHASE - 512;
 
-    /** Counter of sweeper runs. */
     public static final String RESULTS = "sweeper.results";
 
-    /** Counter of the orders handled by sweeper runs. */
     public static final String ORDERS = "sweeper.orders";
 
-    /** Tag holding the sweeper type. */
     public static final String TYPE_TAG = "type";
 
-    /** Tag holding the outcome of a run. */
     public static final String OUTCOME_TAG = "outcome";
 
-    /** Tag holding what happened to the orders of a run. */
     public static final String RESULT_TAG = "result";
 
-    /** Sweeper type of the expired reservations (and payment reconciliation). */
     public static final String RESERVATION_EXPIRATION = "reservation-expiration";
 
-    /** Sweeper type of the stale queued orders. */
     public static final String ORDER_DISPATCH = "order-dispatch";
-
-    private static final Logger log = LoggerFactory.getLogger(MaintenanceTimer.class);
 
     private final ReservationExpirationSchedulerController reservationExpiration;
     private final OrderDispatchSchedulerController orderDispatch;
@@ -68,16 +41,6 @@ public final class MaintenanceTimer implements SmartLifecycle {
     private final Object lifecycleMonitor = new Object();
     private volatile Disposable subscription;
 
-    /**
-     * Creates a stopped timer.
-     *
-     * @param reservationExpiration the expired-reservation sweeper channel
-     * @param orderDispatch         the stale-order dispatch sweeper channel
-     * @param interval              delay between two ticks
-     * @param sweepTimeout          maximum duration of one sweep (the sweeper lease)
-     * @param registry              the meter registry
-     * @param scheduler             the scheduler of the ticks and timeouts ({@code Schedulers.parallel()})
-     */
     public MaintenanceTimer(ReservationExpirationSchedulerController reservationExpiration,
                             OrderDispatchSchedulerController orderDispatch, Duration interval, Duration sweepTimeout,
                             MeterRegistry registry, Scheduler scheduler) {
@@ -100,9 +63,6 @@ public final class MaintenanceTimer implements SmartLifecycle {
         return current != null && !current.isDisposed();
     }
 
-    /**
-     * Starts the timer; does nothing when already running. The first run happens one interval after the start.
-     */
     @Override
     public void start() {
         synchronized (lifecycleMonitor) {
@@ -120,9 +80,6 @@ public final class MaintenanceTimer implements SmartLifecycle {
         }
     }
 
-    /**
-     * Disposes the timer, cancelling a sweep in progress.
-     */
     @Override
     public void stop() {
         synchronized (lifecycleMonitor) {

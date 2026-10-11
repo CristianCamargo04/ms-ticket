@@ -33,7 +33,6 @@ import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveRequest;
 import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveResponse;
 
 class DynamoMigrationConfigTest {
-
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(AwsProperties.class)
     static class PropertiesConfig {

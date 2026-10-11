@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class SqsListenerMetricsTest {
-
     private final MockClock clock = new MockClock();
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry(SimpleConfig.DEFAULT, clock);
     private final SqsListenerMetrics metrics = new SqsListenerMetrics(registry);
@@ -57,8 +56,4 @@ class SqsListenerMetricsTest {
         assertThat(MessageOutcome.POISON.tagValue()).isEqualTo("poison");
     }
 
-    @Test
-    void shouldRequireARegistry() {
-        assertThatNullPointerException().isThrownBy(() -> new SqsListenerMetrics(null));
-    }
 }

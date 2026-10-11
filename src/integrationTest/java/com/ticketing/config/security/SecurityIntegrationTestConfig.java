@@ -16,10 +16,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 
-/**
- * Web layer of the security integration test: the real security chain and decoder (no mocked
- * {@code ReactiveJwtDecoder}), error handling and the order controller's collaborators.
- */
 @TestConfiguration(proxyBeanMethods = false)
 @EnableConfigurationProperties(TicketingProperties.class)
 @Import({SecurityConfig.class, JwtRoleConverter.class, SecurityProblemHandler.class, GlobalErrorHandler.class,
@@ -27,7 +23,6 @@ import org.springframework.context.annotation.Import;
         WebFluxConfig.class, RequestContextResolverImpl.class, IdempotencyKeyResolver.class,
         RequestFingerprintCalculator.class, OrderDtoMapper.class})
 class SecurityIntegrationTestConfig {
-
     @Bean
     Clock clock() {
         return Clock.systemUTC();

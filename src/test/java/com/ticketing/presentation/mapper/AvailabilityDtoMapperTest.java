@@ -9,7 +9,6 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class AvailabilityDtoMapperTest {
-
     private final AvailabilityDtoMapper mapper = new AvailabilityDtoMapper();
 
     @Test

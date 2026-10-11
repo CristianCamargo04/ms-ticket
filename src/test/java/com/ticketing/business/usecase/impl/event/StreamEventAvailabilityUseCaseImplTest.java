@@ -31,7 +31,6 @@ import reactor.test.scheduler.VirtualTimeScheduler;
 
 @ExtendWith(MockitoExtension.class)
 class StreamEventAvailabilityUseCaseImplTest {
-
     private static final Duration INTERVAL = EVENT_POLICY.availabilityStreamInterval();
     private static final String OTHER_EVENT_ID = "33333333-3333-3333-3333-333333333333";
 
@@ -56,7 +55,6 @@ class StreamEventAvailabilityUseCaseImplTest {
                 NOW.plusSeconds(secondsAfterNow));
     }
 
-    /** Every poll sees one more ticket sold: the n-th lookup reports {@code 100 - n} available tickets. */
     private AtomicInteger givenATicketSoldBeforeEveryPoll() {
         AtomicInteger lookups = new AtomicInteger();
         when(getEventAvailabilityUseCase.execute(EVENT_ID)).thenAnswer(invocation -> {

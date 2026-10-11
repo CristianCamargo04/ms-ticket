@@ -25,26 +25,18 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.json.JsonMapper;
 
-/**
- * Runtime-mode gating of the HTTP API (ADR-008): a worker-only instance answers {@code 404} on {@code /api/**}
- * before Spring Security runs, while the rest of the server (actuator) keeps working; {@code api} and {@code all}
- * instances do not register the filter.
- */
 @WebFluxTest(controllers = WorkerModeWebConfigTest.ProbeController.class,
         properties = "ticketing.runtime-mode=worker")
 @Import({RestControllerTestConfig.class, WorkerModeWebConfig.class, WorkerModeWebConfigTest.ProbeController.class})
 class WorkerModeWebConfigTest {
-
     @Autowired
     private WebTestClient webTestClient;
 
     @MockitoBean
     private ReactiveJwtDecoder reactiveJwtDecoder;
 
-    /** Answers 200 on every path: any other status comes from the filters. */
     @RestController
     static class ProbeController {
-
         @RequestMapping("/**")
         Mono<String> any() {
             return Mono.just("ok");
@@ -95,8 +87,6 @@ class WorkerModeWebConfigTest {
 
     @Test
     void shouldStartNeitherQueueConsumersNorSweepersOnApiInstances() {
-        // The worker channels are gated by WorkerModeCondition (see SqsListenerConfigTest / SchedulingConfigTest);
-        // an API instance must not even define them.
         contextRunner()
                 .withUserConfiguration(SqsListenerConfig.class, SchedulingConfig.class)
                 .withPropertyValues("ticketing.runtime-mode=api")

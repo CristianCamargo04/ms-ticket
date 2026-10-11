@@ -19,12 +19,7 @@ import org.springframework.core.io.ClassPathResource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/**
- * Guards the DynamoDB migration files and the SQS message schemas (resources shared by the migration runner,
- * Terraform and the messaging layer).
- */
 class MigrationResourcesTest {
-
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final String CHANGELOG = "db/changelog/db.changelog-master.yaml";
 

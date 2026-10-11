@@ -23,7 +23,6 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 class ResilienceConfigTest {
-
     private final ResilienceConfig config = new ResilienceConfig();
 
     private static WebClientResponseException responseError(int code) {

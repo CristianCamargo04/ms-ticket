@@ -10,11 +10,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-/**
- * Thread-safe {@link SqsOrderQueueClient} fake recording every published message.
- */
 public final class RecordingSqsOrderQueueClient implements SqsOrderQueueClient {
-
     private final Queue<OrderReservationMessage> reservations = new ConcurrentLinkedQueue<>();
     private final Queue<PaymentRequestedMessage> payments = new ConcurrentLinkedQueue<>();
     private final AtomicLong sequence = new AtomicLong();

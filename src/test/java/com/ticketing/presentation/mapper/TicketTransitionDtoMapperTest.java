@@ -11,7 +11,6 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class TicketTransitionDtoMapperTest {
-
     private final TicketTransitionDtoMapper mapper = new TicketTransitionDtoMapper();
 
     @Test

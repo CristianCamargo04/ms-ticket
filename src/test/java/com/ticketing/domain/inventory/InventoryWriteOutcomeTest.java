@@ -12,10 +12,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 class InventoryWriteOutcomeTest {
-
     private static final OrderData ORDER = reserved();
 
-    /** Mirrors how the business layer consumes an outcome: an exhaustive switch without default branch. */
     private static String describe(InventoryWriteOutcome outcome) {
         return switch (outcome) {
             case InventoryWriteOutcome.Applied(OrderData order) -> "applied:" + order.orderId();

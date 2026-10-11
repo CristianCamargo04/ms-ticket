@@ -34,7 +34,6 @@ import reactor.test.StepVerifier;
 import reactor.util.context.Context;
 
 class ObservabilityConfigTest {
-
     private final ObservabilityConfig config = new ObservabilityConfig();
     private boolean propagationEnabledBefore;
 
@@ -109,7 +108,6 @@ class ObservabilityConfigTest {
         config.afterPropertiesSet();
         ExecutorService sdkThreads = Executors.newSingleThreadExecutor();
         try {
-            // like an AWS SDK call: the future completes on a thread Reactor knows nothing about
             Mono<String> pipeline = Mono.fromFuture(() -> CompletableFuture.supplyAsync(() -> "done", sdkThreads))
                     .map(value -> value + ":" + MDC.get("correlationId"))
                     .contextWrite(Context.of("correlationId", "corr-sqs-7"));

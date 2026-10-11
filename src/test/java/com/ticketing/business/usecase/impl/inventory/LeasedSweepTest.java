@@ -24,7 +24,6 @@ import reactor.test.publisher.PublisherProbe;
 
 @ExtendWith(MockitoExtension.class)
 class LeasedSweepTest {
-
     private static final String LOCK = "test-sweeper";
     private static final String OWNER = SWEEPER_POLICY.instanceId();
 

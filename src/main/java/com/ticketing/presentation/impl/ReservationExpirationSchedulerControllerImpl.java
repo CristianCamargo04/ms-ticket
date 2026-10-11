@@ -4,27 +4,16 @@ import com.ticketing.business.usecase.ReleaseExpiredReservationsUseCase;
 import com.ticketing.domain.data.SweepResult;
 import com.ticketing.presentation.ReservationExpirationSchedulerController;
 import java.util.Objects;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
-/**
- * Timer channel of the expired-reservation sweeper. Never emits an error: a failed run is logged and reported as
- * {@link SweepResult#skipped()}, so the periodic timer keeps running.
- */
+@Slf4j
 @Component
 public class ReservationExpirationSchedulerControllerImpl implements ReservationExpirationSchedulerController {
 
-    private static final Logger log = LoggerFactory.getLogger(ReservationExpirationSchedulerControllerImpl.class);
-
     private final ReleaseExpiredReservationsUseCase releaseExpiredReservationsUseCase;
 
-    /**
-     * Creates the controller.
-     *
-     * @param releaseExpiredReservationsUseCase the sweeper use case
-     */
     public ReservationExpirationSchedulerControllerImpl(
             ReleaseExpiredReservationsUseCase releaseExpiredReservationsUseCase) {
         this.releaseExpiredReservationsUseCase = Objects.requireNonNull(releaseExpiredReservationsUseCase,

@@ -13,46 +13,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
-/**
- * Event cache backed by a Caffeine {@link AsyncCache} that stores the in-flight load as a future.
- *
- * <ul>
- *   <li>Concurrent {@link #get} calls for the same id share one future, so the loader runs once (no cache
- *   stampede on a hot event).</li>
- *   <li>A load that completes empty completes the future with {@code null} and a load that fails completes it
- *   exceptionally; Caffeine removes both, so neither "not found" nor errors are cached.</li>
- *   <li>Entries expire {@link EventCacheSettings#ttl()} after the load completes and the cache holds at most
- *   {@link EventCacheSettings#maxSize()} events.</li>
- *   <li>A caller that cancels (e.g. a client disconnect) never cancels the shared load of the other callers.</li>
- *   <li>The shared load is subscribed outside the caller's pipeline (as a future), so it explicitly runs with the
- *   Reactor context of the caller that triggered it: the correlation id and the tracing/observation state reach the
- *   loader (and, with automatic context propagation, its log lines). Callers that join an in-flight load keep their
- *   own context downstream.</li>
- * </ul>
- * The cache never blocks: callers subscribe to the shared future.
- */
 @Component
 public final class EventCacheServiceImpl implements EventCacheService {
-
     private final AsyncCache<String, EventData> cache;
 
-    /**
-     * Creates the cache with the system ticker and Caffeine's default maintenance executor.
-     *
-     * @param settings TTL and maximum size
-     */
     @Autowired
     public EventCacheServiceImpl(EventCacheSettings settings) {
         this(settings, Ticker.systemTicker(), ForkJoinPool.commonPool());
     }
 
-    /**
-     * Creates the cache with an explicit time source and maintenance executor (deterministic tests).
-     *
-     * @param settings TTL and maximum size
-     * @param ticker   time source of the expiration
-     * @param executor executor of Caffeine's maintenance work (eviction, removal)
-     */
     EventCacheServiceImpl(EventCacheSettings settings, Ticker ticker, Executor executor) {
         Objects.requireNonNull(settings, "settings");
         this.cache = Caffeine.newBuilder()

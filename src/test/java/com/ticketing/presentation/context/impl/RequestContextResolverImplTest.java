@@ -24,7 +24,6 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 class RequestContextResolverImplTest {
-
     private final RequestContextResolverImpl resolver = new RequestContextResolverImpl();
 
     private static Jwt jwt(String subject) {
@@ -129,7 +128,7 @@ class RequestContextResolverImplTest {
     @Test
     void shouldTakeTheRightmostForwardedForHopAppendedByTheLoadBalancer() throws Exception {
         assertThat(clientIpWithForwardedFor("203.0.113.7")).isEqualTo("203.0.113.7");
-        // the client forged the first hop; the ALB appended the real peer address
+
         assertThat(clientIpWithForwardedFor("1.2.3.4, 203.0.113.7")).isEqualTo("203.0.113.7");
         assertThat(clientIpWithForwardedFor("1.2.3.4,203.0.113.7 , ")).isEqualTo("203.0.113.7");
         assertThat(clientIpWithForwardedFor("2001:db8::1")).isEqualTo("2001:db8::1");

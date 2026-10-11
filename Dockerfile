@@ -28,7 +28,7 @@ ENV GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.welcome=never -Dorg.grad
 # Build scripts and wrapper first: they change far less often than the sources.
 COPY --chmod=0755 gradlew ./
 COPY gradle/ gradle/
-COPY settings.gradle.kts build.gradle.kts gradle.properties ./
+COPY settings.gradle.kts build.gradle.kts gradle.properties lombok.config ./
 # Only production sources: tests are executed by CI, never inside the image build.
 COPY src/main/ src/main/
 

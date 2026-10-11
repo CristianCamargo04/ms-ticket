@@ -15,20 +15,15 @@ import com.ticketing.presentation.impl.idempotency.IdempotencyKeyResolver;
 import com.ticketing.presentation.impl.idempotency.RequestFingerprintCalculator;
 import com.ticketing.presentation.impl.support.ResourceIdValidator;
 import com.ticketing.presentation.mapper.OrderDtoMapper;
-import java.util.Objects;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 
-/**
- * Order endpoints. The customer is always the JWT subject of the caller; ownership is enforced by the use cases,
- * which answer {@code 404 ORDER_NOT_FOUND} for orders of other customers (no existence leak). Path identifiers are
- * checked by {@link ResourceIdValidator} before anything else.
- */
+@RequiredArgsConstructor
 @RestController
 public class OrderRestControllerImpl implements OrderRestController {
-
     private final PlaceOrderUseCase placeOrderUseCase;
     private final GetOrderStatusUseCase getOrderStatusUseCase;
     private final ConfirmOrderUseCase confirmOrderUseCase;
@@ -37,33 +32,6 @@ public class OrderRestControllerImpl implements OrderRestController {
     private final IdempotencyKeyResolver idempotencyKeyResolver;
     private final RequestFingerprintCalculator fingerprintCalculator;
     private final OrderDtoMapper mapper;
-
-    /**
-     * Creates the controller.
-     *
-     * @param placeOrderUseCase      queues new orders
-     * @param getOrderStatusUseCase  reads orders
-     * @param confirmOrderUseCase    confirms reservations
-     * @param cancelOrderUseCase     cancels orders
-     * @param requestContextResolver resolves the caller
-     * @param idempotencyKeyResolver validates the idempotency key header
-     * @param fingerprintCalculator  fingerprints idempotent requests
-     * @param mapper                 DTO mapper
-     */
-    public OrderRestControllerImpl(PlaceOrderUseCase placeOrderUseCase, GetOrderStatusUseCase getOrderStatusUseCase,
-                                   ConfirmOrderUseCase confirmOrderUseCase, CancelOrderUseCase cancelOrderUseCase,
-                                   RequestContextResolver requestContextResolver,
-                                   IdempotencyKeyResolver idempotencyKeyResolver,
-                                   RequestFingerprintCalculator fingerprintCalculator, OrderDtoMapper mapper) {
-        this.placeOrderUseCase = Objects.requireNonNull(placeOrderUseCase, "placeOrderUseCase");
-        this.getOrderStatusUseCase = Objects.requireNonNull(getOrderStatusUseCase, "getOrderStatusUseCase");
-        this.confirmOrderUseCase = Objects.requireNonNull(confirmOrderUseCase, "confirmOrderUseCase");
-        this.cancelOrderUseCase = Objects.requireNonNull(cancelOrderUseCase, "cancelOrderUseCase");
-        this.requestContextResolver = Objects.requireNonNull(requestContextResolver, "requestContextResolver");
-        this.idempotencyKeyResolver = Objects.requireNonNull(idempotencyKeyResolver, "idempotencyKeyResolver");
-        this.fingerprintCalculator = Objects.requireNonNull(fingerprintCalculator, "fingerprintCalculator");
-        this.mapper = Objects.requireNonNull(mapper, "mapper");
-    }
 
     @Override
     public Mono<ResponseEntity<OrderAcceptedResponseDto>> placeOrder(String eventId, String idempotencyKey,
@@ -91,8 +59,6 @@ public class OrderRestControllerImpl implements OrderRestController {
     public Mono<ResponseEntity<OrderStatusResponseDto>> confirmOrder(String orderId, String idempotencyKey,
                                                                      ConfirmOrderRequestDto request,
                                                                      ServerHttpRequest httpRequest) {
-        // The key is validated for API consistency; confirmation is idempotent by order state (the payment gateway
-        // is called with the order id as its own idempotency key).
         return Mono.fromCallable(() -> {
                     ResourceIdValidator.requireValid(ResourceIdValidator.ORDER_ID, orderId);
                     return idempotencyKeyResolver.resolve(idempotencyKey);

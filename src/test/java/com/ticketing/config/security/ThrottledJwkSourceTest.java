@@ -32,7 +32,6 @@ import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
 class ThrottledJwkSourceTest {
-
     private static final Duration MIN_REFRESH = Duration.ofSeconds(30);
     private static final Instant START = Instant.parse("2026-10-10T10:00:00Z");
 
@@ -195,9 +194,7 @@ class ThrottledJwkSourceTest {
                 .withMessageContaining("minRefreshInterval");
     }
 
-    /** A clock the test moves forward explicitly. */
     private static final class MutableClock extends Clock {
-
         private Instant now;
 
         MutableClock(Instant now) {

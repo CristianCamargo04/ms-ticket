@@ -34,16 +34,8 @@ import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 
-/**
- * DynamoDB adapter of the {@code orders} table, including the sparse, sharded {@code deadline-index} scanned by the
- * sweepers (implementation spec 6.2).
- *
- * <p>Every status change is a conditional write on the expected processing status, so concurrent workers, sweepers
- * and API calls never overwrite each other: the loser gets {@code false} and re-reads.
- */
 @Repository
 public class OrderPersistenceImpl implements OrderPersistence {
-
     private static final Comparator<OrderData> BY_DEADLINE = Comparator.comparing(OrderData::deadlineAt)
             .thenComparing(OrderData::orderId);
 
@@ -53,15 +45,6 @@ public class OrderPersistenceImpl implements OrderPersistence {
     private final DeadlinePartitioner partitioner;
     private final String tableName;
 
-    /**
-     * Creates the adapter.
-     *
-     * @param dynamoDb       low-level client
-     * @param enhancedClient enhanced client
-     * @param tableNames     physical table names
-     * @param mapper         order mapper
-     * @param partitioner    deadline index partitioner
-     */
     public OrderPersistenceImpl(DynamoDbAsyncClient dynamoDb, DynamoDbEnhancedAsyncClient enhancedClient,
                                 DynamoDbTableNames tableNames, OrderEntityMapper mapper,
                                 DeadlinePartitioner partitioner) {
@@ -92,12 +75,6 @@ public class OrderPersistenceImpl implements OrderPersistence {
                 .map(mapper::toDomain);
     }
 
-    /**
-     * {@inheritDoc}
-     *
-     * <p>Every shard is queried in parallel (at most {@code limit} orders each); the merged result is sorted by
-     * deadline so that the most overdue orders are processed first, whatever their shard.
-     */
     @Override
     public Flux<OrderData> findDueOrders(DeadlineTypeEnum type, Instant now, int limit) {
         return Flux.defer(() -> {

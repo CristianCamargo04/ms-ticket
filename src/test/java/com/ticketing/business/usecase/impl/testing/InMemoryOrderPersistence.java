@@ -10,11 +10,7 @@ import java.util.List;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-/**
- * In-memory {@link OrderPersistence}: conditional writes are compare-and-set under the store monitor.
- */
 public final class InMemoryOrderPersistence implements OrderPersistence {
-
     private final InMemoryTicketingStore store;
 
     public InMemoryOrderPersistence(InMemoryTicketingStore store) {

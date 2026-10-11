@@ -47,7 +47,6 @@ import software.amazon.awssdk.services.dynamodb.model.UpdateItemResponse;
 
 @ExtendWith(MockitoExtension.class)
 class OrderPersistenceImplTest {
-
     private static final String TABLE = "t-orders";
     private static final AttributeValue NOW_MILLIS = AttributeValue.fromN(Long.toString(NOW.toEpochMilli()));
 

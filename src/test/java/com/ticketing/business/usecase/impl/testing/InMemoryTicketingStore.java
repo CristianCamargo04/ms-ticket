@@ -14,28 +14,12 @@ import java.util.function.Supplier;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-/**
- * Thread-safe in-memory state shared by the persistence fakes (events, tickets, orders, audit trail).
- *
- * <p>Every operation runs atomically under the store monitor, like a single DynamoDB request (item write or
- * {@code TransactWriteItems}) is atomic and serializable, and completes asynchronously on {@link Schedulers#parallel()}
- * like a non-blocking SDK call. Use cases therefore interleave freely <em>between</em> calls, which is exactly where
- * their races live (read, select, then conditionally write).
- */
 public final class InMemoryTicketingStore {
-
     private final Map<String, EventData> events = new HashMap<>();
     private final Map<String, NavigableMap<String, TicketData>> tickets = new HashMap<>();
     private final Map<String, OrderData> orders = new HashMap<>();
     private final List<TicketTransitionData> transitions = new ArrayList<>();
 
-    /**
-     * Runs an operation atomically on a parallel worker thread.
-     *
-     * @param operation the operation; a {@code null} result completes the {@link Mono} empty
-     * @param <T>       result type
-     * @return the result
-     */
     <T> Mono<T> atomically(Supplier<T> operation) {
         return Mono.fromCallable(() -> {
             synchronized (this) {
@@ -43,8 +27,6 @@ public final class InMemoryTicketingStore {
             }
         }).subscribeOn(Schedulers.parallel());
     }
-
-    // --- state accessors used by the fakes (callers hold the monitor) ---
 
     Map<String, EventData> eventsTable() {
         return events;
@@ -62,14 +44,6 @@ public final class InMemoryTicketingStore {
         return transitions;
     }
 
-    // --- seeding and inspection used by the tests ---
-
-    /**
-     * Stores an event with {@code totalCapacity} tickets in the statuses implied by its counters (all available when
-     * the event is new).
-     *
-     * @param event the event
-     */
     public synchronized void seedEventWithAvailableTickets(EventData event) {
         events.put(event.eventId(), event);
         NavigableMap<String, TicketData> eventTickets = ticketsOf(event.eventId());
@@ -80,11 +54,6 @@ public final class InMemoryTicketingStore {
         }
     }
 
-    /**
-     * Stores an order as is.
-     *
-     * @param order the order
-     */
     public synchronized void seedOrder(OrderData order) {
         orders.put(order.orderId(), order);
     }

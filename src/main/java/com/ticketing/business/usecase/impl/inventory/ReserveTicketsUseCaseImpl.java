@@ -8,11 +8,11 @@ import com.ticketing.domain.exception.InventoryConflictException;
 import com.ticketing.domain.exception.OrderNotFoundException;
 import com.ticketing.domain.exception.TicketingException;
 import com.ticketing.domain.internal_request.ReserveTicketsRequest;
-import com.ticketing.domain.inventory.InventoryWriteOutcome;
 import com.ticketing.domain.inventory.InventoryWriteOutcome.Applied;
 import com.ticketing.domain.inventory.InventoryWriteOutcome.InsufficientInventory;
 import com.ticketing.domain.inventory.InventoryWriteOutcome.OrderStateChanged;
 import com.ticketing.domain.inventory.InventoryWriteOutcome.StaleTicketSelection;
+import com.ticketing.domain.inventory.InventoryWriteOutcome;
 import com.ticketing.domain.inventory.IssueComplimentaryCommand;
 import com.ticketing.domain.inventory.ReserveInventoryCommand;
 import com.ticketing.domain.inventory.RetryPolicy;
@@ -33,41 +33,21 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.random.RandomGenerator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.RetryBackoffSpec;
 
-/**
- * Reserves (or issues as complimentary) the tickets of a queued order; SQS consumer, idempotent under at-least-once
- * delivery.
- *
- * <p>Concurrency model: no lock is taken. Each attempt reads the event counters (consistent read), selects candidate
- * tickets from the eventually consistent availability index and applies one conditional transaction (event counter
- * {@code availableCount >= q}, every ticket still {@code AVAILABLE}, order still {@code QUEUED}). The database decides
- * every race: a stale ticket selection is retried with backoff and a fresh selection, a failed counter condition
- * rejects the order as sold out and a failed order condition means another delivery already processed it.
- *
- * <p>Candidate selection starts at a random ticket and samples randomly among {@code quantity * candidateFactor}
- * candidates so that concurrent workers rarely pick the same tickets.
- */
+@Slf4j
 @Service
 public class ReserveTicketsUseCaseImpl implements ReserveTicketsUseCase {
-
-    /** Actor recorded in the audit trail. */
     static final String ACTOR = "order-worker";
 
-    /** Rejection reason when the event does not exist or is not on sale. */
     static final String REASON_EVENT_NOT_ON_SALE = ErrorCodeEnum.EVENT_NOT_ON_SALE.name();
 
-    /** Rejection reason when there are not enough available tickets. */
     static final String REASON_SOLD_OUT = ErrorCodeEnum.SOLD_OUT.name();
 
-    /** Scan from the first ticket of the availability index. */
     static final String FROM_FIRST_TICKET = "";
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(ReserveTicketsUseCaseImpl.class);
 
     private final OrderPersistence orderPersistence;
     private final EventPersistence eventPersistence;
@@ -78,18 +58,6 @@ public class ReserveTicketsUseCaseImpl implements ReserveTicketsUseCase {
     private final Clock clock;
     private final RandomGenerator randomGenerator;
 
-    /**
-     * Creates the use case.
-     *
-     * @param orderPersistence                orders table
-     * @param eventPersistence                events table
-     * @param ticketPersistence               tickets table (availability index)
-     * @param inventoryTransactionPersistence inventory transactions
-     * @param orderPolicy                     order rules (hold duration, candidate factor)
-     * @param inventoryRetryPolicy            retries of transient inventory conflicts
-     * @param clock                           time source
-     * @param randomGenerator                 thread-safe random source of the ticket selection
-     */
     public ReserveTicketsUseCaseImpl(OrderPersistence orderPersistence, EventPersistence eventPersistence,
                                      TicketPersistence ticketPersistence,
                                      InventoryTransactionPersistence inventoryTransactionPersistence,
@@ -107,21 +75,18 @@ public class ReserveTicketsUseCaseImpl implements ReserveTicketsUseCase {
         this.randomGenerator = randomGenerator;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public Mono<OrderData> execute(ReserveTicketsRequest request) {
         String orderId = request.orderId();
         return reload(orderId)
                 .flatMap(order -> {
                     if (order.processingStatus() != OrderProcessingStatusEnum.QUEUED) {
-                        LOGGER.debug("Order {} already processed ({}), duplicate delivery ignored", orderId,
+                        log.debug("Order {} already processed ({}), duplicate delivery ignored", orderId,
                                 order.processingStatus());
                         return Mono.just(order);
                     }
                     return Mono.defer(() -> attempt(order))
-                            .doOnError(TicketingException::isRetryable, error -> LOGGER.debug(
+                            .doOnError(TicketingException::isRetryable, error -> log.debug(
                                     "Inventory conflict on order {}, retrying: {}", orderId, error.getMessage()))
                             .retryWhen(inventoryRetry);
                 });
@@ -146,7 +111,7 @@ public class ReserveTicketsUseCaseImpl implements ReserveTicketsUseCase {
                 .flatMap(ticketIds -> write(order, ticketIds, now))
                 .flatMap(outcome -> switch (outcome) {
                     case Applied(OrderData applied) -> {
-                        LOGGER.info("Order {} holds tickets {} ({})", applied.orderId(), applied.ticketIds(),
+                        log.info("Order {} holds tickets {} ({})", applied.orderId(), applied.ticketIds(),
                                 applied.ticketStatus());
                         yield Mono.just(applied);
                     }
@@ -195,7 +160,6 @@ public class ReserveTicketsUseCaseImpl implements ReserveTicketsUseCase {
         return List.copyOf(union);
     }
 
-    /** Partial Fisher-Yates shuffle: a uniform random sample of {@code size} candidates, returned sorted. */
     private List<String> sample(List<String> candidates, int size) {
         List<String> pool = new ArrayList<>(candidates);
         for (int i = 0; i < size; i++) {
@@ -209,7 +173,7 @@ public class ReserveTicketsUseCaseImpl implements ReserveTicketsUseCase {
                         OrderProcessingStatusEnum.QUEUED, OrderProcessingStatusEnum.REJECTED, reason, now))
                 .doOnNext(rejected -> {
                     if (rejected) {
-                        LOGGER.info("Order {} rejected: {}", order.orderId(), reason);
+                        log.info("Order {} rejected: {}", order.orderId(), reason);
                     }
                 })
                 .then(reload(order.orderId()));

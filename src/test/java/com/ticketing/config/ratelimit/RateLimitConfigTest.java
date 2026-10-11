@@ -35,17 +35,12 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.json.JsonMapper;
 
-/**
- * The rate limiter registered by {@link RateLimitConfig} inside the real filter chain (after authentication), and its
- * on/off switch.
- */
 @WebFluxTest(controllers = OrderRestControllerImpl.class, properties = {
     "ticketing.rate-limit.capacity=2",
     "ticketing.rate-limit.refill-tokens=1",
     "ticketing.rate-limit.refill-period=1m"})
 @Import({RestControllerTestConfig.class, RateLimitConfig.class})
 class RateLimitConfigTest {
-
     private static final Clock CLOCK = Clock.fixed(RestControllerTestConfig.NOW, ZoneOffset.UTC);
 
     @Autowired

@@ -38,9 +38,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class PaymentGatewayChargeClientImplTest {
-
     private static final Duration VERIFY_TIMEOUT = Duration.ofSeconds(20);
-    /** Generous call timeout: only the dedicated timeout test relies on timing, the others must never time out. */
+
     private static final PaymentGatewaySettings SETTINGS =
             new PaymentGatewaySettings(Duration.ofSeconds(3), 2, Duration.ofMillis(10));
     private static final PaymentChargeRequest REQUEST = new PaymentChargeRequest("order-1", "order-1", "customer-1",

@@ -7,7 +7,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 class OrderProcessingStatusEnumTest {
-
     @ParameterizedTest(name = "{0} terminal={1}")
     @CsvSource({
             "QUEUED,           false",

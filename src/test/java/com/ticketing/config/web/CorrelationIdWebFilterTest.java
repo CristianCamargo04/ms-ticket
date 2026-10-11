@@ -17,12 +17,10 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 class CorrelationIdWebFilterTest {
-
     private static final String UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
 
     private final CorrelationIdWebFilter filter = new CorrelationIdWebFilter();
 
-    /** Captures what the next filters see. */
     private static final class CapturingChain implements WebFilterChain {
         private final AtomicReference<ServerWebExchange> exchange = new AtomicReference<>();
         private final AtomicReference<String> contextValue = new AtomicReference<>();

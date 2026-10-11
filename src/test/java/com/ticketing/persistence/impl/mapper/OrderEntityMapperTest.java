@@ -21,7 +21,6 @@ import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 class OrderEntityMapperTest {
-
     private final DeadlinePartitioner partitioner = new DeadlinePartitioner(TABLES);
     private final OrderEntityMapper mapper = new OrderEntityMapper(partitioner);
 

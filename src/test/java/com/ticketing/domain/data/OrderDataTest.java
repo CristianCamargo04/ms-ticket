@@ -18,7 +18,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 class OrderDataTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
     private static final Instant LATER = NOW.plusSeconds(60);
     private static final Instant DISPATCH_DEADLINE = NOW.plusSeconds(30);

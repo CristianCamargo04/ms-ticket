@@ -38,7 +38,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class SqsOrderQueueClientImplTest {
-
     private static final String RESERVATION_QUEUE = "ticketing-order-reservation";
     private static final String PAYMENT_QUEUE = "ticketing-order-payment";
     private static final String RESERVATION_URL = "http://sqs.local/000000000000/" + RESERVATION_QUEUE;

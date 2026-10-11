@@ -34,7 +34,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class OrderReservationSqsControllerImplTest {
-
     private static final String ORDER_ID = "0b1f6d2c-8a43-5e7f-9c21-4d5e6f708192";
     private static final String PAYLOAD = """
             {"orderId":"%s","eventId":"e-1","correlationId":"corr-42","occurredAt":"2026-10-10T10:00:00Z"}

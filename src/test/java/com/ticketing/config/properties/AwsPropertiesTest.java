@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
 
 class AwsPropertiesTest {
-
     private static void assertDefaultNames(AwsProperties properties) {
         assertThat(properties.dynamodb().tables().events()).isEqualTo("ticketing-events");
         assertThat(properties.dynamodb().tables().tickets()).isEqualTo("ticketing-tickets");

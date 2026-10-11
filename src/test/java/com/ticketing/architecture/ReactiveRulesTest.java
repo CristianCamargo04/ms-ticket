@@ -24,13 +24,7 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-/**
- * Forbids blocking calls on the reactive request and worker paths (implementation spec section 1, item 4).
- * Only {@code config} may block, and only at startup (migration runner). Both direct calls and method
- * references (e.g. {@code Mono::block}) are detected.
- */
 class ReactiveRulesTest {
-
     private static final String[] NON_BLOCKING_LAYERS =
             {PRESENTATION, BUSINESS, PERSISTENCE, CLIENT, CACHE, DOMAIN, UTIL};
 

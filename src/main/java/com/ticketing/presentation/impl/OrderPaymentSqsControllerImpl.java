@@ -8,35 +8,19 @@ import com.ticketing.presentation.dto.message.PaymentRequestedMessageRequestDto;
 import com.ticketing.presentation.impl.support.JsonMessageReader;
 import com.ticketing.presentation.mapper.OrderMessageDtoMapper;
 import java.util.Objects;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import reactor.util.context.Context;
 
-/**
- * Consumes the order-payment queue: charges a confirmed order and finalizes or releases its tickets.
- *
- * <p>Acknowledgement policy: completion deletes the message. A non-retryable business error is logged and
- * acknowledged; malformed messages and retryable failures (payment gateway unavailable, inventory conflict) propagate
- * as error signals so SQS redelivers the message, then dead-letters it. The payment token is never logged.
- */
+@Slf4j
 @Component
 public class OrderPaymentSqsControllerImpl implements OrderPaymentSqsController {
-
-    private static final Logger log = LoggerFactory.getLogger(OrderPaymentSqsControllerImpl.class);
 
     private final JsonMessageReader messageReader;
     private final OrderMessageDtoMapper mapper;
     private final ProcessOrderPaymentUseCase processOrderPaymentUseCase;
 
-    /**
-     * Creates the controller.
-     *
-     * @param messageReader              parses and validates message bodies
-     * @param mapper                     maps messages to use-case requests
-     * @param processOrderPaymentUseCase the payment use case
-     */
     public OrderPaymentSqsControllerImpl(JsonMessageReader messageReader, OrderMessageDtoMapper mapper,
                                          ProcessOrderPaymentUseCase processOrderPaymentUseCase) {
         this.messageReader = Objects.requireNonNull(messageReader, "messageReader");

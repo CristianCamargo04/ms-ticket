@@ -33,7 +33,6 @@ import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 
 @ExtendWith(MockitoExtension.class)
 class TicketTransitionPersistenceImplTest {
-
     private static final TicketTransitionData RESERVED = transition("t-1", TicketStatusEnum.AVAILABLE,
             TicketStatusEnum.RESERVED, TransitionReasonEnum.RESERVATION, 0);
     private static final TicketTransitionData RELEASED = transition("t-2", TicketStatusEnum.RESERVED,

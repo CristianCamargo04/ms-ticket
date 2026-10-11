@@ -38,7 +38,6 @@ import reactor.test.scheduler.VirtualTimeScheduler;
 
 @ExtendWith(MockitoExtension.class)
 class MaintenanceTimerTest {
-
     private static final Duration INTERVAL = Duration.ofSeconds(15);
     private static final Duration LEASE = Duration.ofSeconds(30);
     private static final SweepResult EXPIRATION_RESULT = new SweepResult(true, 3, 1, 0, 1);
@@ -186,7 +185,6 @@ class MaintenanceTimerTest {
         timer = new MaintenanceTimer(reservationExpiration, orderDispatch, INTERVAL, Duration.ofMinutes(1), registry,
                 scheduler);
 
-        // first run from 15s to 55s: the ticks of 30s and 45s are dropped, the next run starts at 60s
         timer.start();
         scheduler.advanceTimeBy(Duration.ofSeconds(59));
         verify(reservationExpiration, times(1)).execute();

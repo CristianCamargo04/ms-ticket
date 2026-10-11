@@ -12,7 +12,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.boot.context.properties.bind.Binder;
 
 class SqsListenerSettingsTest {
-
     private static final Duration SECOND = Duration.ofSeconds(1);
     private static final Duration THIRTY_SECONDS = Duration.ofSeconds(30);
 
@@ -28,7 +27,6 @@ class SqsListenerSettingsTest {
 
         SqsListenerSettings settings = SqsListenerSettings.from(messaging, Duration.ofSeconds(45));
 
-        // the container drains within 90 % of the lifecycle phase timeout
         assertThat(settings).isEqualTo(new SqsListenerSettings(10, 20, 60, 16, 2,
                 SqsListenerSettings.DEFAULT_REDELIVERY_BASE_DELAY, SqsListenerSettings.DEFAULT_REDELIVERY_MAX_DELAY,
                 SqsListenerSettings.DEFAULT_POLL_RETRY_MIN_BACKOFF, SqsListenerSettings.DEFAULT_POLL_RETRY_MAX_BACKOFF,

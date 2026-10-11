@@ -19,7 +19,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ReserveInventoryCommandTest {
-
     @Test
     void shouldDescribeAReservation() {
         OrderData order = queuedStandard();

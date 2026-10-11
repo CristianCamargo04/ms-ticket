@@ -19,7 +19,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class SqsOrderQueueClientMapperTest {
-
     private static final Instant OCCURRED_AT = Instant.parse("2026-10-10T12:00:00.123Z");
 
     private final SqsOrderQueueClientMapper mapper = new SqsOrderQueueClientMapper();

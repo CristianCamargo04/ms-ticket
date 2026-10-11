@@ -8,7 +8,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class EventPolicyTest {
-
     private static final Duration INTERVAL = Duration.ofSeconds(1);
 
     @Test

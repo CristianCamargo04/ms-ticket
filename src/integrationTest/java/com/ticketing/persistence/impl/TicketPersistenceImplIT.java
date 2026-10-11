@@ -16,7 +16,6 @@ import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
 class TicketPersistenceImplIT {
-
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
     private static final int CAPACITY = 130;
 

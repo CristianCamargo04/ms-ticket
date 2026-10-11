@@ -15,8 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.SmartLifecycle;
@@ -42,94 +41,27 @@ import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 
-/**
- * Reactive SQS consumer that drives the inbound queue channels (ADR-004): a non-blocking replacement for Spring Cloud
- * AWS built on {@link SqsAsyncClient} and Reactor.
- *
- * <h2>Pipeline (per {@link SqsQueueListener})</h2>
- * <ol>
- *   <li>The queue URL is resolved with {@code GetQueueUrl}, retried with backoff until the queue exists. The
- *       {@code maxReceiveCount} of the queue's redrive policy is read once; it only classifies a failure on the last
- *       allowed delivery as {@code poison} (metric and log level) and never changes the redelivery delay, so a redrive
- *       policy edited while the container runs cannot alter the backoff.</li>
- *   <li>{@code pollers} receive loops call {@code ReceiveMessage} (long polling, {@code ApproximateReceiveCount} and
- *       every message attribute) and repeat while the container runs. With short polling ({@code waitTimeSeconds}
- *       0) a loop pauses {@link #SHORT_POLLING_IDLE_DELAY} after an empty receive.</li>
- *   <li>Messages are processed by {@code flatMap(handle, concurrency)}: at most {@code concurrency} messages of a
- *       queue are in flight. The loops are merged with a prefetch of one, so a poller issues its next
- *       {@code ReceiveMessage} only once its previous batch has been handed to a free worker slot: received but not
- *       yet started messages never exceed {@code pollers x maxMessages}. Polling therefore follows the processing
- *       rate (backpressure) instead of piling up messages whose visibility timeout is ticking.</li>
- *   <li>A handler is bounded by {@link SqsListenerSettings#handlerTimeout()} (90 % of the visibility timeout): a hung
- *       handler is cancelled and its message rejected, so it cannot hold a worker slot forever (which would stall
- *       the queue once every slot is taken) nor keep running after SQS has made the message visible again. The
- *       visibility clock starts at the receipt, so a message that waited for a free slot may still be redelivered
- *       while its handler runs; the idempotent consumers absorb that duplicate.</li>
- * </ol>
- *
- * <h2>Acknowledgement and redelivery</h2>
- * <ul>
- *   <li>Handler completion: the message is deleted (outcome {@code acked}).</li>
- *   <li>Handler error or timeout: the visibility timeout is changed to {@code min(2^receiveCount x 5s, 300s)}, so a
- *       failing message is redelivered with exponential backoff (outcome {@code failed}). The last delivery allowed by
- *       the redrive policy gets the same backoff (outcome {@code poison}, logged at ERROR): SQS moves the message to
- *       the dead-letter queue on its next receive, once that delay has elapsed.</li>
- *   <li>SQS call failures (queue resolution, polling) are retried with backoff forever and logged at WARN at most
- *       once per {@link #FAILURE_WARNING_INTERVAL} per receive loop, even when failures and successes alternate; one
- *       message never stops the pipeline (every per-message error is contained, no {@code onErrorContinue}).</li>
- * </ul>
- * The handler runs with the message's correlation id (message attribute {@value #CORRELATION_ID_ATTRIBUTE}, or the
- * SQS message id when absent or malformed), message id and receive count in its Reactor context; the container's
- * own log lines carry the correlation id in the MDC.
- *
- * <h2>Lifecycle</h2>
- * {@link #start()} subscribes the pipeline. {@link #stop(Runnable)} stops polling (an in-flight long poll is
- * cancelled), lets the in-flight and already received messages finish, then runs the callback; after
- * {@link SqsListenerSettings#shutdownTimeout()} (90 % of {@code spring.lifecycle.timeout-per-shutdown-phase}, so the
- * forced stop completes inside Spring's wait for the phase) the remaining handlers are cancelled (their messages are
- * redelivered after the visibility timeout). The container shares the {@link #PHASE phase} of the web server's
- * graceful shutdown: it starts after the web server, and on stop the SQS drain and the HTTP drain run concurrently
- * within one phase timeout, which therefore has to cover the longer of the two (keep the orchestrator's stop timeout,
- * e.g. the ECS {@code stopTimeout}, above it). Both happen long before the AWS SDK clients and the Reactor Netty
- * resources are closed. The only blocking code is the synchronous {@link #stop()} required by the {@code Lifecycle}
- * contract.
- */
+@Slf4j
 public final class SqsListenerContainer implements SmartLifecycle {
-
-    /**
-     * Lifecycle phase, the one of the web server's graceful shutdown: started after the web server, stopped together
-     * with its graceful shutdown (both drains run concurrently) and before the web server itself.
-     */
     public static final int PHASE = WebServerApplicationContext.GRACEFUL_SHUTDOWN_PHASE;
 
-    /** Pause of a receive loop after an empty receive when short polling ({@code waitTimeSeconds} 0) is configured. */
     public static final Duration SHORT_POLLING_IDLE_DELAY = Duration.ofSeconds(1);
 
-    /** Reactor context key of the SQS message id. */
     public static final String MESSAGE_ID_KEY = "sqsMessageId";
 
-    /** Reactor context key of the SQS approximate receive count (an {@code Integer}). */
     public static final String RECEIVE_COUNT_KEY = "sqsReceiveCount";
 
-    /** Message attribute carrying the correlation id (set by the publisher). */
     public static final String CORRELATION_ID_ATTRIBUTE = "correlationId";
 
-    /** Requests every message attribute. */
     static final String ALL_MESSAGE_ATTRIBUTES = "All";
 
-    /** Retries of a failed {@code DeleteMessage} before giving up (the message is then redelivered). */
     static final int DELETE_RETRIES = 2;
 
-    /** First delay between two {@code DeleteMessage} attempts. */
     static final Duration DELETE_RETRY_BACKOFF = Duration.ofMillis(200);
 
-    /** Minimum interval between two WARN logs of a failing SQS call loop. */
     static final Duration FAILURE_WARNING_INTERVAL = Duration.ofSeconds(30);
 
-    /** Extra time the synchronous {@link #stop()} waits on top of the drain timeout. */
     static final Duration STOP_GRACE = Duration.ofSeconds(1);
-
-    private static final Logger log = LoggerFactory.getLogger(SqsListenerContainer.class);
 
     private static final String CORRELATION_ID_KEY = RequestContext.CORRELATION_ID_KEY;
     private static final Pattern VALID_CORRELATION_ID = Pattern.compile("^[A-Za-z0-9-]{1,64}$");
@@ -144,15 +76,6 @@ public final class SqsListenerContainer implements SmartLifecycle {
     private final Object lifecycleMonitor = new Object();
     private final AtomicReference<Run> currentRun = new AtomicReference<>();
 
-    /**
-     * Creates a stopped container.
-     *
-     * @param sqsClient the asynchronous SQS client
-     * @param listeners the queues to consume, at least one
-     * @param settings  polling, concurrency, backoff and shutdown settings
-     * @param metrics   the instrumentation
-     * @param scheduler the scheduler of retry delays and of the shutdown timeout ({@code Schedulers.parallel()})
-     */
     public SqsListenerContainer(SqsAsyncClient sqsClient, List<SqsQueueListener> listeners,
                                 SqsListenerSettings settings, SqsListenerMetrics metrics, Scheduler scheduler) {
         this.sqsClient = Objects.requireNonNull(sqsClient, "sqsClient");
@@ -170,19 +93,11 @@ public final class SqsListenerContainer implements SmartLifecycle {
         return PHASE;
     }
 
-    /**
-     * Whether the container consumes (or is still draining) messages.
-     *
-     * @return {@code true} from {@link #start()} until the stop has completed
-     */
     @Override
     public boolean isRunning() {
         return currentRun.get() != null;
     }
 
-    /**
-     * Starts consuming every queue; does nothing when already running.
-     */
     @Override
     public void start() {
         synchronized (lifecycleMonitor) {
@@ -203,12 +118,6 @@ public final class SqsListenerContainer implements SmartLifecycle {
         }
     }
 
-    /**
-     * Stops polling, drains the in-flight messages and then runs the callback (asynchronously). In-flight handlers
-     * still running after the shutdown timeout are cancelled.
-     *
-     * @param callback invoked once the container has stopped
-     */
     @Override
     public void stop(Runnable callback) {
         Objects.requireNonNull(callback, "callback");
@@ -220,13 +129,6 @@ public final class SqsListenerContainer implements SmartLifecycle {
         stopped.doFinally(signal -> callback.run()).subscribe();
     }
 
-    /**
-     * Synchronous variant of {@link #stop(Runnable)}.
-     *
-     * <p>This is the only blocking code of the container: {@code Lifecycle#stop()} must not return before the
-     * component has stopped, so the calling thread waits (at most the shutdown timeout plus {@link #STOP_GRACE}).
-     * Spring itself uses {@link #stop(Runnable)}.
-     */
     @Override
     public void stop() {
         CountDownLatch stopped = new CountDownLatch(1);
@@ -241,13 +143,6 @@ public final class SqsListenerContainer implements SmartLifecycle {
         }
     }
 
-    /**
-     * Parses the {@code maxReceiveCount} of a redrive policy.
-     *
-     * @param redrivePolicy the {@code RedrivePolicy} queue attribute (JSON), {@code null} when the queue has none
-     * @return the maximum receive count, empty when there is no (parsable) redrive policy
-     * @throws NumberFormatException when the count does not fit in an {@code int}
-     */
     static OptionalInt parseMaxReceiveCount(String redrivePolicy) {
         if (redrivePolicy == null) {
             return OptionalInt.empty();
@@ -340,7 +235,7 @@ public final class SqsListenerContainer implements SmartLifecycle {
                 .messageAttributeNames(ALL_MESSAGE_ATTRIBUTES)
                 .build();
         boolean shortPolling = settings.waitTimeSeconds() == 0;
-        // one failure log per receive loop: its streak and its rate limit are not reset by another loop's success
+
         Flux<Message> poller = Flux.defer(() -> {
             FailureLog failures = new FailureLog("receive messages from", queue.name());
             return Mono.fromFuture(() -> sqsClient.receiveMessage(request))
@@ -404,7 +299,7 @@ public final class SqsListenerContainer implements SmartLifecycle {
     private Mono<MessageOutcome> reject(QueueBinding queue, Delivery delivery, Throwable error) {
         OptionalInt maxReceiveCount = queue.maxReceiveCount();
         boolean poison = maxReceiveCount.isPresent() && delivery.receiveCount() >= maxReceiveCount.getAsInt();
-        // always the spec backoff, even on the last delivery: a stale maxReceiveCount can never cause a hot loop
+
         Duration redeliveryDelay = settings.redeliveryDelay(delivery.receiveCount());
         MessageOutcome outcome = poison ? MessageOutcome.POISON : MessageOutcome.FAILED;
         withCorrelationId(delivery, () -> {
@@ -453,24 +348,20 @@ public final class SqsListenerContainer implements SmartLifecycle {
         }
     }
 
-    /** State of one start/stop cycle. */
     private static final class Run {
         private final Sinks.One<Boolean> stopSignal = Sinks.one();
         private final Sinks.Empty<Void> terminated = Sinks.empty();
         private final Disposable.Swap subscription = Disposables.swap();
         private volatile boolean stopping;
-        /** Completion of the stop request; guarded by the lifecycle monitor. */
+
         private Mono<Void> completion;
     }
 
-    /** A resolved queue and its handler. */
     private record QueueBinding(String name, String url, OptionalInt maxReceiveCount,
                                 Function<String, Mono<Void>> handler, AtomicInteger inFlight) {
     }
 
-    /** One received message with its parsed metadata. */
     private record Delivery(Message message, String messageId, String correlationId, int receiveCount) {
-
         static Delivery of(Message message) {
             String messageId = Objects.requireNonNullElse(message.messageId(), UNKNOWN_MESSAGE_ID);
             MessageAttributeValue attribute = message.messageAttributes().get(CORRELATION_ID_ATTRIBUTE);
@@ -494,13 +385,6 @@ public final class SqsListenerContainer implements SmartLifecycle {
         }
     }
 
-    /**
-     * Rate-limited logging of one failing SQS call loop (one instance per receive loop, or per queue resolution).
-     *
-     * <p>At most one WARN per {@link #FAILURE_WARNING_INTERVAL}: the window survives a recovery, so failures that
-     * alternate with successes (throttling, a flaky network) are rate limited too. A recovery is logged at INFO only
-     * when its failure streak produced a WARN, so it never adds a line the rate limit would have suppressed.
-     */
     private final class FailureLog {
         private static final long NEVER = Long.MIN_VALUE;
 

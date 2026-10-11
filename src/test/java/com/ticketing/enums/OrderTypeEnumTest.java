@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class OrderTypeEnumTest {
-
     @Test
     void shouldDeclareThePersistedConstants() {
         assertThat(OrderTypeEnum.values()).containsExactly(OrderTypeEnum.STANDARD, OrderTypeEnum.COMPLIMENTARY);

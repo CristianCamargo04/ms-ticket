@@ -13,7 +13,6 @@ import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 
 class PaymentGatewayChargeClientMapperTest {
-
     private final PaymentGatewayChargeClientMapper mapper = new PaymentGatewayChargeClientMapper();
 
     @Test

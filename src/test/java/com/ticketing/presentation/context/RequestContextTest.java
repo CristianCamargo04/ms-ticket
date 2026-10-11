@@ -10,7 +10,6 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class RequestContextTest {
-
     @Test
     void shouldNormalizeRolesWithOrWithoutPrefix() {
         RequestContext context = new RequestContext("admin-1", Set.of("ROLE_ADMIN", "CUSTOMER"), "corr-1", "10.0.0.1");

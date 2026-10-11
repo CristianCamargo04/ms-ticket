@@ -17,28 +17,13 @@ import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedExce
 import software.amazon.awssdk.services.dynamodb.model.DeleteItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 
-/**
- * Lease-based distributed lock on the {@code distributed-locks} table.
- *
- * <p>Acquisition is a single conditional put, atomic on the server: it succeeds when the lock does not exist, when
- * its lease is over or when the caller already owns it (renewal). {@code expiresAt} (epoch seconds) lets the DynamoDB
- * TTL garbage-collect leases whose owner crashed; correctness never depends on the TTL because the condition
- * compares {@code leaseUntil} with the caller's clock.
- */
 @Repository
 public class DistributedLockPersistenceImpl implements DistributedLockPersistence {
-
     private static final Map<String, String> OWNER_NAME = Map.of("#owner", "owner");
 
     private final DynamoDbAsyncClient dynamoDb;
     private final String tableName;
 
-    /**
-     * Creates the adapter.
-     *
-     * @param dynamoDb   low-level client
-     * @param tableNames physical table names
-     */
     public DistributedLockPersistenceImpl(DynamoDbAsyncClient dynamoDb, DynamoDbTableNames tableNames) {
         this.dynamoDb = dynamoDb;
         this.tableName = tableNames.distributedLocks();

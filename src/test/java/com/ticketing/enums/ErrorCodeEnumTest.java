@@ -7,7 +7,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 class ErrorCodeEnumTest {
-
     @ParameterizedTest(name = "{0} -> {1} retryable={2}")
     @CsvSource({
             "VALIDATION_ERROR,            400, false",

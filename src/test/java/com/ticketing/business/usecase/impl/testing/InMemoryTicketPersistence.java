@@ -12,25 +12,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-/**
- * In-memory {@link TicketPersistence} that emulates the eventual consistency of the {@code eventId-statusKey-index}
- * GSI: {@link #findAvailable} reads a snapshot of the tickets that is only refreshed every {@code refreshEvery} calls,
- * so concurrent workers routinely see tickets as available after they were reserved (stale selections that the
- * conditional transaction must reject).
- */
 public final class InMemoryTicketPersistence implements TicketPersistence {
-
     private final InMemoryTicketingStore store;
     private final int refreshEvery;
     private final Map<String, NavigableMap<String, TicketData>> indexSnapshots = new ConcurrentHashMap<>();
     private long calls;
 
-    /**
-     * Creates the fake.
-     *
-     * @param store        shared state
-     * @param refreshEvery the index snapshot is refreshed on one call out of {@code refreshEvery} (1 = always fresh)
-     */
     public InMemoryTicketPersistence(InMemoryTicketingStore store, int refreshEvery) {
         this.store = store;
         this.refreshEvery = refreshEvery;

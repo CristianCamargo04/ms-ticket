@@ -21,7 +21,6 @@ import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 
 class ProblemDetailFactoryTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
 
     private final ProblemDetailFactory factory = new ProblemDetailFactory(Clock.fixed(NOW, ZoneOffset.UTC));
@@ -30,7 +29,6 @@ class ProblemDetailFactoryTest {
         return MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/events/e-1"));
     }
 
-    /** A business exception without message, to cover the fallback detail. */
     private static final class SilentException extends TicketingException {
         SilentException() {
             super(ErrorCodeEnum.SOLD_OUT, null);
@@ -109,7 +107,6 @@ class ProblemDetailFactoryTest {
 
     @Test
     void shouldRejectMissingArguments() {
-        assertThatNullPointerException().isThrownBy(() -> new ProblemDetailFactory(null));
         assertThatNullPointerException().isThrownBy(() -> factory.forErrorCode(null, "x", exchange()));
         assertThatNullPointerException().isThrownBy(() -> factory.forException(null, exchange()));
         assertThatNullPointerException().isThrownBy(() -> factory.forStatus(null, "x", exchange()));

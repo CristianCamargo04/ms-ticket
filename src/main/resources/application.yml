@@ -1,8 +1,3 @@
-# Single configuration file. The first document holds the common settings; the documents below it are activated by
-# profile (spring.config.activate.on-profile): local (docker compose / IDE), ci (Testcontainers) and prod (AWS ECS).
-# No credentials anywhere: the AWS SDK uses DefaultCredentialsProvider (environment variables locally,
-# IAM task role in AWS) and JWTs are validated against the issuer's JWKS.
-
 spring:
   application:
     name: ms-ticket
@@ -10,15 +5,11 @@ spring:
     banner-mode: off
   web:
     resources:
-      # Pure JSON API: no static resource handler, so unknown routes are plain 404 problem details.
       add-mappings: false
   threads:
     virtual:
-      # Only affects Spring-managed task executors (scheduling / residual blocking work), never the WebFlux
-      # request path (see ADR-009).
       enabled: true
   lifecycle:
-    # Graceful shutdown budget: in-flight HTTP requests and SQS messages are drained before stopping.
     timeout-per-shutdown-phase: 30s
   security:
     oauth2:
@@ -69,7 +60,6 @@ ticketing:
     confirmation-timeout: 5m
     republish-after: 30s
     max-tickets-per-order: 10
-    # DynamoDB transactions allow 100 items and a command writes 2n + 2 of them.
     max-complimentary-per-request: 40
     candidate-factor: 3
   events:
@@ -122,10 +112,6 @@ ticketing:
 
 aws:
   region: ${AWS_REGION:us-east-1}
-  # Optional per-service endpoint overrides (DynamoDB Local / LocalStack); only set in the local and ci profiles below:
-  # endpoint-override:
-  #   dynamodb-endpoint: http://localhost:8000
-  #   sqs-endpoint: http://localhost:4566
   dynamodb:
     tables:
       events: ticketing-events
@@ -140,12 +126,7 @@ aws:
     order-payment-queue: ticketing-order-payment
 
 ---
-# ===================================================================== profile: local
 spring.config.activate.on-profile: local
-
-# Local development: DynamoDB Local, LocalStack (SQS), WireMock payment gateway and mock-oauth2-server.
-# AWS credentials come from the environment (e.g. AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY dummies in .env);
-# nothing secret is stored here. Plain-text console logs (no structured logging).
 
 spring:
   security:
@@ -180,12 +161,7 @@ aws:
     sqs-endpoint: ${SQS_ENDPOINT:http://localhost:4566}
 
 ---
-# ===================================================================== profile: ci
 spring.config.activate.on-profile: ci
-
-# Continuous integration (integration tests with Testcontainers). Container endpoints and the JWT issuer are
-# usually injected at runtime (@DynamicPropertySource); the environment placeholders below are the fallback.
-# Table and queue names keep the defaults of application.yml.
 
 management:
   tracing:
@@ -221,22 +197,9 @@ aws:
     sqs-endpoint: ${SQS_ENDPOINT:http://localhost:4566}
 
 ---
-# ===================================================================== profile: prod
 spring.config.activate.on-profile: prod
 
-# AWS production (ECS Fargate). Every environment-specific value comes from environment variables injected by the
-# task definition; values without a default are mandatory (startup fails fast when they are missing).
-# Credentials come from the IAM task role; secrets, if any, from Secrets Manager. Migrations are owned by Terraform.
-# Placeholders read the variable names the Terraform task definitions inject (infra/terraform/envs/*/main.tf, the
-# relaxed-binding names such as TICKETING_SECURITY_ISSUER or AWS_DYNAMODB_TABLES_EVENTS), with the older short names
-# (JWT_ISSUER_URI, DYNAMODB_TABLE_EVENTS, ...) as fallbacks. Every placeholder must resolve with Terraform's variables
-# alone: Spring Boot evaluates some of these keys strictly at startup (e.g. the issuer-uri auto-configuration
-# condition), so an unresolvable one aborts the context.
-
 management:
-  # Actuator on its own port (ALB target-group health checks, in-VPC scrapers): it is never served on the
-  # business port, and the ALB listener only forwards client traffic to 8080. The security chain also applies to
-  # the management server (its child context inherits the WebFilters), so /actuator/health/** stays public there.
   server:
     port: ${MANAGEMENT_SERVER_PORT:8081}
   endpoint:
@@ -257,9 +220,6 @@ logging:
 
 server:
   port: ${SERVER_PORT:8080}
-  # TLS terminates at the ALB: Reactor Netty derives the request scheme/host from X-Forwarded-Proto/-Host, so
-  # generated URLs are https. Client IPs are NOT taken from here (Netty uses the first, spoofable X-Forwarded-For
-  # hop): RequestContextResolverImpl reads the rightmost hop, the one appended by the ALB.
   forward-headers-strategy: native
 
 spring:
@@ -287,7 +247,6 @@ ticketing:
     pollers: ${TICKETING_MESSAGING_POLLERS:2}
   payment:
     base-url: ${TICKETING_PAYMENT_BASEURL:${PAYMENT_GATEWAY_BASE_URL}}
-    # api-key is bound from TICKETING_PAYMENT_APIKEY (Secrets Manager); deliberately not declared here.
   security:
     audience: ${TICKETING_SECURITY_AUDIENCE:${JWT_AUDIENCE}}
     issuer: ${TICKETING_SECURITY_ISSUER:${JWT_ISSUER_URI}}

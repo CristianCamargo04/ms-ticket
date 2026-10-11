@@ -19,7 +19,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class GetEventAvailabilityUseCaseImplTest {
-
     @Mock
     private EventPersistence eventPersistence;
 

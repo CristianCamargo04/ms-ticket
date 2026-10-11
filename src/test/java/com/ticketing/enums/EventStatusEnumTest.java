@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class EventStatusEnumTest {
-
     @Test
     void shouldDeclareThePersistedConstants() {
         assertThat(EventStatusEnum.values())

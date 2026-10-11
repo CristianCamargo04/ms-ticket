@@ -19,10 +19,8 @@ import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
 class OrderPersistenceImplIT {
-
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
 
-    /** Far in the past, so that orders created by the other tests of this class are never due at this instant. */
     private static final Instant SWEEP_INSTANT = Instant.parse("2020-01-01T00:00:00Z");
 
     private static PersistenceTestContext context;

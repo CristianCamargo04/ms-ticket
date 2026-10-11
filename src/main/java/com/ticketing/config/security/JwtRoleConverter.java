@@ -16,28 +16,12 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
-/**
- * Turns a validated JWT into the authentication of the request: the principal name is the {@code sub} claim and the
- * authorities are {@code ROLE_<NAME>} for every role listed in the configured claim
- * ({@code ticketing.security.roles-claim}, {@code roles} by default; e.g. {@code cognito:groups} in AWS).
- *
- * <p>The claim may be a JSON array or a string separated by spaces or commas. Role names are trimmed, upper-cased and
- * an existing {@code ROLE_} prefix is not duplicated, so {@code ["customer", "ROLE_ADMIN"]} yields
- * {@code ROLE_CUSTOMER} and {@code ROLE_ADMIN}.
- */
 @Component
 public class JwtRoleConverter implements Converter<Jwt, Mono<AbstractAuthenticationToken>> {
-
-    /** Prefix of the role authorities. */
     public static final String ROLE_PREFIX = "ROLE_";
 
     private final String rolesClaim;
 
-    /**
-     * Creates the converter.
-     *
-     * @param properties application settings ({@code ticketing.security.roles-claim})
-     */
     public JwtRoleConverter(TicketingProperties properties) {
         this.rolesClaim = Objects.requireNonNull(properties.security().rolesClaim(), "rolesClaim");
     }
@@ -47,12 +31,6 @@ public class JwtRoleConverter implements Converter<Jwt, Mono<AbstractAuthenticat
         return Mono.just(new JwtAuthenticationToken(jwt, authoritiesOf(jwt), jwt.getSubject()));
     }
 
-    /**
-     * Extracts the role authorities of a token.
-     *
-     * @param jwt the token
-     * @return distinct {@code ROLE_*} authorities (empty when the claim is missing or of an unsupported type)
-     */
     List<GrantedAuthority> authoritiesOf(Jwt jwt) {
         Object claim = jwt.getClaims().get(rolesClaim);
         Stream<String> roleNames = switch (claim) {

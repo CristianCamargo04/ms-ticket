@@ -25,12 +25,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/**
- * Every inventory transaction against DynamoDB Local: happy paths (including the parity between the in-memory
- * {@code Applied} order and the persisted one) and every failing condition.
- */
 class InventoryTransactionPersistenceImplIT {
-
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
     private static final Duration HOLD = Duration.ofMinutes(10);
     private static final String WORKER = "order-worker";
@@ -171,10 +166,6 @@ class InventoryTransactionPersistenceImplIT {
         assertCounters(event, 3, 0, 0, 0, 1);
     }
 
-    /**
-     * {@code Clock.systemUTC()} has sub-millisecond precision while the table stores epoch milliseconds: the
-     * {@code Applied} order must still equal a later read.
-     */
     @Test
     void shouldReturnTheStoredStateForSubMillisecondCommandInstants() {
         EventData event = context.onSaleEventWithTickets(2);

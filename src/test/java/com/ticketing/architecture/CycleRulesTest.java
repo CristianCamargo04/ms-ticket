@@ -5,12 +5,7 @@ import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.sli
 
 import org.junit.jupiter.api.Test;
 
-/**
- * Forbids dependency cycles between the top-level application packages ({@code presentation}, {@code business},
- * {@code domain}, {@code persistence}, {@code client}, {@code cache}, {@code config}, {@code enums}, {@code util}).
- */
 class CycleRulesTest {
-
     @Test
     void topLevelPackagesShouldBeFreeOfCycles() {
         slices().matching("com.ticketing.(*)..")

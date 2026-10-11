@@ -39,7 +39,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class PlaceOrderUseCaseImplTest {
-
     private static final String IDEMPOTENCY_KEY = "key-12345678";
     private static final String EXPECTED_ORDER_ID =
             DeterministicIdUtil.nameBasedId(CUSTOMER_ID + ":" + IDEMPOTENCY_KEY);

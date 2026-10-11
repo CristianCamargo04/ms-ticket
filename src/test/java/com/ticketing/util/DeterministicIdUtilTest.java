@@ -9,14 +9,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 class DeterministicIdUtilTest {
-
     private static final UUID NAMESPACE_DNS = UUID.fromString("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
 
     @ParameterizedTest(name = "{0} -> {1}")
     @CsvSource({
-            // RFC 9562, appendix A.4 (UUIDv5 example)
             "www.example.com, 2ed6657d-e927-568b-95e1-2665a8aea6a2",
-            // Python documentation: uuid.uuid5(uuid.NAMESPACE_DNS, 'python.org')
+
             "python.org,      886313e1-3b8a-5372-9b90-0c9aee199e5d"
     })
     void shouldMatchKnownTestVectors(String name, String expected) {

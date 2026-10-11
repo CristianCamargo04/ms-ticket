@@ -9,14 +9,7 @@ import org.springframework.context.annotation.ConditionContext;
 import org.springframework.core.env.Environment;
 import org.springframework.core.type.AnnotatedTypeMetadata;
 
-/**
- * Matches when this instance runs the workers: {@code ticketing.runtime-mode} is {@code all} (the default) or
- * {@code worker} (see {@link RuntimeModeEnum#workerEnabled()}). Guards every inbound worker channel: the SQS listener
- * container and the sweeper timer. An {@code api} instance creates none of them.
- */
 public final class WorkerModeCondition extends SpringBootCondition {
-
-    /** Property selecting the runtime mode. */
     public static final String RUNTIME_MODE_PROPERTY = "ticketing.runtime-mode";
 
     @Override
@@ -28,12 +21,6 @@ public final class WorkerModeCondition extends SpringBootCondition {
                 : ConditionOutcome.noMatch(message.because(RUNTIME_MODE_PROPERTY + " is " + runtimeMode));
     }
 
-    /**
-     * Resolves the runtime mode with relaxed binding ({@code worker}, {@code WORKER}, ...).
-     *
-     * @param environment the environment
-     * @return the configured mode, {@link RuntimeModeEnum#ALL} when unset
-     */
     public static RuntimeModeEnum runtimeMode(Environment environment) {
         return Binder.get(environment).bind(RUNTIME_MODE_PROPERTY, RuntimeModeEnum.class).orElse(RuntimeModeEnum.ALL);
     }

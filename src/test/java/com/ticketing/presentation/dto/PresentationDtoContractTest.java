@@ -25,12 +25,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/**
- * Wire contract of the presentation DTOs: JSON binding with Jackson 3 (including single-component records) and the
- * Jakarta Validation constraints of the specification.
- */
 class PresentationDtoContractTest {
-
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final Instant OCCURRED_AT = Instant.parse("2026-10-10T10:00:00Z");
     private static ValidatorFactory validatorFactory;

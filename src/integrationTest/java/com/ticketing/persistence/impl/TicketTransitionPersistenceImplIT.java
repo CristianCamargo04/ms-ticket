@@ -22,7 +22,6 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 class TicketTransitionPersistenceImplIT {
-
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
 
     private static PersistenceTestContext context;

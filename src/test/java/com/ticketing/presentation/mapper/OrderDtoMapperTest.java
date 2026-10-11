@@ -25,7 +25,6 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class OrderDtoMapperTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
     private static final RequestContext CUSTOMER =
             new RequestContext("customer-1", Set.of("ROLE_CUSTOMER"), "corr-1", "10.0.0.1");

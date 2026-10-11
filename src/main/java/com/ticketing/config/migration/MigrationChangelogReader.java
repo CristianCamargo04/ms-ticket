@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
+import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.yaml.snakeyaml.LoaderOptions;
@@ -17,42 +17,14 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/**
- * Reads the master changelog ({@code db/changelog/db.changelog-master.yaml}) and the migration files it lists
- * (implementation spec 6.4).
- *
- * <p>The changelog is parsed with a safe YAML constructor (no arbitrary types). Ids must be strictly ascending (they
- * start with a {@code yyyyMMddHHmmss} timestamp), which also rejects duplicates. The checksum of a migration is the
- * SHA-256 of its file with line endings normalized to {@code \n}, so a checkout with CRLF line endings does not look
- * like an edited migration.
- */
+@RequiredArgsConstructor
 public class MigrationChangelogReader {
-
-    /** Location of the master changelog. */
     public static final String DEFAULT_CHANGELOG = "classpath:db/changelog/db.changelog-master.yaml";
 
     private final ResourceLoader resourceLoader;
     private final String changelogLocation;
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
-    /**
-     * Creates the reader.
-     *
-     * @param resourceLoader    loads the changelog and the migration files
-     * @param changelogLocation location of the master changelog (e.g. {@link #DEFAULT_CHANGELOG})
-     */
-    public MigrationChangelogReader(ResourceLoader resourceLoader, String changelogLocation) {
-        this.resourceLoader = Objects.requireNonNull(resourceLoader, "resourceLoader");
-        this.changelogLocation = Objects.requireNonNull(changelogLocation, "changelogLocation");
-    }
-
-    /**
-     * Reads every migration of the changelog, in changelog order. Blocking I/O: called once at startup.
-     *
-     * @return the migrations
-     * @throws IllegalStateException when the changelog or a migration file is invalid or missing
-     * @throws UncheckedIOException  when a resource cannot be read
-     */
     public List<Migration> read() {
         Object root = loadYaml(changelogLocation);
         if (!(root instanceof Map<?, ?> rootMap) || !(rootMap.get("databaseChangeLog") instanceof List<?> entries)) {
@@ -122,14 +94,6 @@ public class MigrationChangelogReader {
         return new IllegalStateException("Invalid DynamoDB migration changelog: " + detail);
     }
 
-    /**
-     * One migration of the changelog.
-     *
-     * @param id         unique, ordered identifier ({@code <yyyyMMddHHmmss>_<TICKET>})
-     * @param file       classpath location of the migration file
-     * @param checksum   SHA-256 of the file content (line endings normalized)
-     * @param definition the parsed file (a DynamoDB {@code CreateTable} definition)
-     */
     public record Migration(String id, String file, String checksum, JsonNode definition) {
     }
 }

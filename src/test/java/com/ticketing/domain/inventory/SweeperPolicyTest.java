@@ -8,7 +8,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class SweeperPolicyTest {
-
     private static final Duration LEASE = Duration.ofSeconds(30);
 
     @Test

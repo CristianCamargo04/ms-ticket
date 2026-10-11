@@ -42,7 +42,6 @@ import reactor.core.publisher.Mono;
 @WebFluxTest(controllers = EventRestControllerImpl.class)
 @Import(RestControllerTestConfig.class)
 class EventRestControllerImplTest {
-
     private static final String EVENTS = "/api/v1/events";
     private static final Instant EVENT_DATE = Instant.parse("2099-01-01T20:00:00Z");
     private static final String VALID_BODY = """

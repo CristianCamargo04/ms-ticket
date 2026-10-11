@@ -79,17 +79,10 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-/**
- * Wires the use cases the way the application does (constructor injection, two {@link RetryPolicy} beans resolved
- * by constructor parameter name because business may not use {@code @Qualifier}) and checks through behaviour that
- * each use case received the intended retry policy.
- */
 class UseCaseWiringTest {
-
-    /** Two retries: a use case wired with it calls a failing port three times. */
     private static final RetryPolicy INVENTORY_RETRY = new RetryPolicy(2, Duration.ofMillis(1), Duration.ofMillis(1),
             0.0);
-    /** No retry: a use case wired with it calls a failing port once. */
+
     private static final RetryPolicy PUBLISH_RETRY = new RetryPolicy(0, Duration.ofMillis(1), Duration.ofMillis(1),
             0.0);
     private static final Duration TIMEOUT = Duration.ofSeconds(10);

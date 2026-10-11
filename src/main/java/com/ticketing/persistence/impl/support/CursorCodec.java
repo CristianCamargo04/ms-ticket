@@ -13,22 +13,7 @@ import java.util.stream.Collectors;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
-/**
- * Opaque pagination cursor: the {@code LastEvaluatedKey} of a query encoded as URL-safe Base64.
- *
- * <p>The payload is {@code name=TYPE:value} entries joined by {@code &} (names and values URL-encoded, entries sorted
- * by name). Decoding is strict because the cursor comes from clients: it must be valid Base64, at most
- * {@value #MAX_CURSOR_LENGTH} characters long and contain exactly the key attributes of the queried index with
- * their declared types. Numeric key attributes of this schema are epoch milliseconds, so a numeric value must be a
- * plain integer that fits a {@code long} (at most 19 digits, no sign other than {@code -}, no fraction, no exponent):
- * it is never expanded with {@code BigDecimal}, which would let a tiny cursor such as {@code 1e999999999} allocate a
- * billion-character string, and it is always a number DynamoDB accepts (at most 38 significant digits). Anything else
- * is a {@link DomainValidationException}, so a tampered cursor never reaches DynamoDB as an invalid
- * {@code ExclusiveStartKey}.
- */
 public final class CursorCodec {
-
-    /** Upper bound of an accepted cursor (a real one is far shorter). */
     public static final int MAX_CURSOR_LENGTH = 1024;
 
     private static final String MALFORMED_CURSOR = "Malformed pagination cursor";
@@ -39,13 +24,6 @@ public final class CursorCodec {
     private CursorCodec() {
     }
 
-    /**
-     * Encodes the last evaluated key of a query page.
-     *
-     * @param lastEvaluatedKey the key, may be {@code null} or empty
-     * @return the cursor, or {@code null} when there is no further page
-     * @throws IllegalArgumentException when a key attribute is neither a string nor a number
-     */
     public static String encode(Map<String, AttributeValue> lastEvaluatedKey) {
         if (lastEvaluatedKey == null || lastEvaluatedKey.isEmpty()) {
             return null;
@@ -56,14 +34,6 @@ public final class CursorCodec {
         return ENCODER.encodeToString(payload.getBytes(StandardCharsets.UTF_8));
     }
 
-    /**
-     * Decodes a client cursor into an exclusive start key.
-     *
-     * @param cursor    the cursor, {@code null} or blank for the first page
-     * @param keySchema the key attributes of the queried index with their types
-     * @return the start key, empty for the first page
-     * @throws DomainValidationException when the cursor is malformed
-     */
     public static Map<String, AttributeValue> decode(String cursor, Map<String, ScalarAttributeType> keySchema) {
         if (cursor == null || cursor.isBlank()) {
             return Map.of();
@@ -117,11 +87,6 @@ public final class CursorCodec {
         }
     }
 
-    /**
-     * Parses a numeric key value without ever expanding it: only plain integers of at most 19 digits are accepted,
-     * and {@link Long#parseLong} rejects the ones beyond the {@code long} range with a
-     * {@link NumberFormatException} (an {@link IllegalArgumentException}, reported as a malformed cursor).
-     */
     private static long parseLong(String value) {
         if (!LONG_NUMBER.matcher(value).matches()) {
             throw new DomainValidationException(MALFORMED_CURSOR);

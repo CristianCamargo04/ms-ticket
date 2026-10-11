@@ -25,6 +25,10 @@ dependencies {
     implementation(platform(libs.aws.sdk.bom))
     implementation(platform(libs.jackson.bom))
     annotationProcessor(platform(libs.spring.boot.bom))
+    compileOnly(libs.lombok)
+    annotationProcessor(libs.lombok)
+    testCompileOnly(libs.lombok)
+    testAnnotationProcessor(libs.lombok)
 
     implementation(libs.spring.boot.starter.webflux)
     implementation(libs.spring.boot.starter.validation)
@@ -69,6 +73,8 @@ testing {
         register<JvmTestSuite>("integrationTest") {
             useJUnitJupiter()
             dependencies {
+                compileOnly(libs.lombok)
+                annotationProcessor(libs.lombok)
                 implementation(sourceSets.main.get().output)
                 implementation(platform(libs.spring.boot.bom))
                 implementation(platform(libs.aws.sdk.bom))

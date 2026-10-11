@@ -45,27 +45,8 @@ import software.amazon.awssdk.services.dynamodb.model.TransactWriteItem;
 import software.amazon.awssdk.services.dynamodb.model.TransactWriteItemsRequest;
 import software.amazon.awssdk.services.dynamodb.model.Update;
 
-/**
- * Atomic inventory changes, each one a single {@code TransactWriteItems} (implementation spec 6.3).
- *
- * <p>Item layout for {@code n} tickets, fixed so that cancellation reasons map by index:
- * {@code [0]} event counters, {@code [1..n]} tickets, {@code [n+1]} order, {@code [n+2..2n+1]} audit records. Every
- * update is conditional on the state read by the caller and also does {@code SET updatedAt = :now} and
- * {@code ADD version :one}; every audit record is a put guarded by {@code attribute_not_exists(ticketKey)}. Either all
- * of them commit or none does, which is what makes overselling and double assignment impossible: two concurrent
- * reservations of the same ticket cannot both satisfy {@code #status = :from}, and the event condition
- * {@code availableCount >= :q} is evaluated atomically with the ticket writes.
- *
- * <p>On commit the outcome is {@link InventoryWriteOutcome.Applied} with the caller's order updated in memory through
- * the matching {@code OrderData.with*} method (exactly what was persisted, {@code version + 1}), so callers need no
- * extra read. The command instants are applied with the storage precision (epoch milliseconds, see
- * {@code DynamoAttributes.storedPrecision}), so the returned order equals a later read of the same item. Failures are
- * translated by {@link TransactionCancellationTranslator}.
- */
 @Repository
 public class InventoryTransactionPersistenceImpl implements InventoryTransactionPersistence {
-
-    /** Length of the {@code ClientRequestToken} (DynamoDB accepts 1..36 characters). */
     static final int CLIENT_REQUEST_TOKEN_LENGTH = 36;
 
     private static final String STATUS_PLACEHOLDER = "#status";
@@ -81,14 +62,6 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
     private final TicketTransitionEntityMapper transitionMapper;
     private final Supplier<String> nonceSupplier;
 
-    /**
-     * Creates the adapter.
-     *
-     * @param dynamoDb         low-level client
-     * @param tables           physical table names
-     * @param partitioner      deadline index partitioner
-     * @param transitionMapper audit record mapper
-     */
     @Autowired
     public InventoryTransactionPersistenceImpl(DynamoDbAsyncClient dynamoDb, DynamoDbTableNames tables,
                                                DeadlinePartitioner partitioner,
@@ -96,15 +69,6 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
         this(dynamoDb, tables, partitioner, transitionMapper, () -> UUID.randomUUID().toString());
     }
 
-    /**
-     * Creates the adapter with a custom nonce source (deterministic tests).
-     *
-     * @param dynamoDb         low-level client
-     * @param tables           physical table names
-     * @param partitioner      deadline index partitioner
-     * @param transitionMapper audit record mapper
-     * @param nonceSupplier    one value per built request, part of the {@code ClientRequestToken}
-     */
     InventoryTransactionPersistenceImpl(DynamoDbAsyncClient dynamoDb, DynamoDbTableNames tables,
                                         DeadlinePartitioner partitioner,
                                         TicketTransitionEntityMapper transitionMapper,
@@ -200,13 +164,6 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
                 () -> order.withSale(command.paymentReference(), storedPrecision(command.now())));
     }
 
-    /**
-     * {@inheritDoc}
-     *
-     * <p>Time-based releases are guarded server-side as well: {@code HOLD_EXPIRED} requires
-     * {@code holdExpiresAt <= :now} and {@code CONFIRMATION_TIMEOUT} requires {@code deadlineAt <= :now}, so a
-     * sweeper can never release an order that the customer confirmed (or whose deadline moved) concurrently.
-     */
     @Override
     public Mono<InventoryWriteOutcome> release(ReleaseInventoryCommand command) {
         OrderData order = command.order();
@@ -234,24 +191,6 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
                         storedPrecision(command.now())));
     }
 
-    /**
-     * Idempotency token of a transaction: the first {@value #CLIENT_REQUEST_TOKEN_LENGTH} hex characters of
-     * {@code sha256(operation | orderId | sortedTicketIds | now | nonce)}.
-     *
-     * <p>The request is built once per subscription, so the SDK's own retries of a timed-out call reuse the token and
-     * DynamoDB deduplicates them. The per-request {@code nonce} makes two <em>concurrent callers</em> distinct even
-     * when they send the same command in the same millisecond: without it DynamoDB would treat the second identical
-     * request as an idempotent replay and report success to both callers (duplicate side effects such as a second
-     * payment message), or fail with {@code IdempotentParameterMismatchException} when the parameters differ.
-     * With a fresh nonce the loser is evaluated against the conditions and gets {@code OrderStateChanged}.
-     *
-     * @param operation operation name (release operations include their reason)
-     * @param orderId   order identifier
-     * @param ticketIds affected tickets, any order
-     * @param now       command instant
-     * @param nonce     unique value of the built request
-     * @return the token
-     */
     static String clientRequestToken(String operation, String orderId, List<String> ticketIds, Instant now,
                                      String nonce) {
         String sortedTicketIds = ticketIds.stream().sorted().collect(Collectors.joining(","));
@@ -333,12 +272,6 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
                 .build();
     }
 
-    /**
-     * Operation-specific part of one update: SET clauses (without {@code updatedAt}), optional REMOVE attributes,
-     * the condition and the values of the placeholders they use. {@code :now} and {@code :one} are always added; the
-     * event update also gets {@code :q} and the ticket updates {@code :to}, {@code :from}, {@code :statusKey} and
-     * {@code :orderId}.
-     */
     private record ItemChange(String set, String remove, String condition, Map<String, AttributeValue> values) {
     }
 }

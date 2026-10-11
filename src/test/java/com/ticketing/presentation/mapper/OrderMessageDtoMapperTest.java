@@ -11,7 +11,6 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class OrderMessageDtoMapperTest {
-
     private static final Instant OCCURRED_AT = Instant.parse("2026-10-10T10:00:00Z");
 
     private final OrderMessageDtoMapper mapper = new OrderMessageDtoMapper();

@@ -15,7 +15,6 @@ import reactor.test.StepVerifier;
 
 @ExtendWith(MockitoExtension.class)
 class OrderDispatchSchedulerControllerImplTest {
-
     @Mock
     private RepublishStaleOrdersUseCase republishStaleOrdersUseCase;
 

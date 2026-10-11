@@ -14,7 +14,6 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 
 class SchedulingConfigTest {
-
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(PropertiesConfig.class, SchedulingConfig.class)
             .withBean(ReservationExpirationSchedulerController.class,

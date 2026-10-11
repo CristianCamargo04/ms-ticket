@@ -13,12 +13,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 
 import org.junit.jupiter.api.Test;
 
-/**
- * Keeps layer-private data structures (entities and DTOs) inside the layer that owns them
- * (implementation spec section 1 and docs/design/architecture-rules.md).
- */
 class EncapsulationRulesTest {
-
     @Test
     void persistenceEntitiesShouldOnlyBeUsedByPersistenceAndConfig() {
         classes().that().resideInAPackage(PERSISTENCE_ENTITY)

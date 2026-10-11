@@ -76,28 +76,17 @@ import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
-/**
- * Races of the order lifecycle against thread-safe in-memory adapters that implement the conditional semantics of
- * implementation spec 6.3 atomically (each adapter call is serializable, like one DynamoDB request, and completes on
- * {@link Schedulers#parallel()}). The ticket availability index lags behind the tickets on purpose, so concurrent
- * workers select stale tickets and the conditional transaction has to arbitrate.
- *
- * <p>Invariants checked after every race: no ticket is ever held by two orders, the event counters always partition
- * the capacity and match the tickets, every ticket transition is audited exactly once, and exactly one competitor
- * wins each conflicting write.
- */
 class ReserveTicketsUseCaseImplConcurrencyTest {
-
     private static final int CAPACITY = 100;
     private static final int COMPETING_ORDERS = 1_000;
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
-    /** Short real-time backoff with many retries: the contention phase of a sold-out burst is short but intense. */
+
     private static final RetryPolicy CONTENDED_RETRY = new RetryPolicy(100, Duration.ofMillis(1),
             Duration.ofMillis(10), 0.5);
-    /** Same thread-safe random source as the production bean. */
+
     private static final RandomGenerator RANDOM = () -> ThreadLocalRandom.current().nextLong();
-    /** The availability index is refreshed on one read out of three. */
+
     private static final int INDEX_REFRESH_EVERY = 3;
 
     private InMemoryTicketingStore store;
@@ -208,10 +197,6 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
         assertThat(store.transitions()).hasSize(3);
     }
 
-    /**
-     * Free-running race: the invariants must hold whatever the interleaving, but the scheduler decides who wins (the
-     * confirmations usually do), so both arbitration outcomes are forced by the next test.
-     */
     @RepeatedTest(10)
     void shouldLetExactlyOneOfConfirmationAndExpirationWinAtTheHoldBoundary() {
         Instant holdEnd = NOW;
@@ -273,12 +258,6 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
         assertThat(locks.isHeld(ReleaseExpiredReservationsUseCaseImpl.LOCK_NAME)).as("lease released").isFalse();
     }
 
-    /**
-     * Contested race with both outcomes forced: every confirmation reads the still reserved order, then for half of
-     * the orders the sweeper's release commits between that read and the confirmation's conditional write (the
-     * expiration wins), and for the other half the confirmation commits before the sweeper's release, which carries a
-     * stale snapshot from the lagging deadline index (the confirmation wins).
-     */
     @RepeatedTest(3)
     void shouldArbitrateBothOutcomesOfAContestedConfirmationAndExpiration() {
         Instant holdEnd = NOW;
@@ -398,7 +377,6 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
                 queueClient, ORDER_POLICY, PUBLISH_RETRY_POLICY, CLOCK);
     }
 
-    /** Reserves 50 orders of 2 tickets (the whole capacity) whose hold ends at {@code holdEnd}. */
     private List<OrderData> reserveFiftyOrdersOfTwoTicketsHeldUntil(Instant holdEnd) {
         List<OrderData> queued = IntStream.range(0, CAPACITY / 2)
                 .mapToObj(i -> queued("held-%02d".formatted(i), "customer-" + i, 2))
@@ -432,7 +410,6 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
         });
     }
 
-    /** The event counters partition the capacity and match the persisted ticket statuses. */
     private void assertCountersMatchTickets(int capacity, int available, int reserved, int pending) {
         EventData event = store.event(EVENT_ID);
         Map<TicketStatusEnum, Long> tickets = store.tickets(EVENT_ID).stream()
@@ -449,12 +426,7 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
                 .allSatisfy(ticket -> assertThat(ticket.orderId()).isNull());
     }
 
-    /**
-     * Deadline index that still lists the reserved orders as due for hold expiration (GSI lag), so the sweeper
-     * attempts every release while the customers confirm: the race is decided by the conditional writes alone.
-     */
     private static final class LaggingDeadlineIndex implements OrderPersistence {
-
         private final OrderPersistence delegate;
         private final List<OrderData> laggingHoldExpirations;
 
@@ -494,14 +466,7 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
         }
     }
 
-    /**
-     * Sequences the two competing writes of each order without blocking any thread. For an order whose expiration must
-     * win, the sweeper's release waits until the confirmation has read the order and reached its write, and the
-     * confirmation's write waits until the release has committed. For the other orders the sweeper's release waits
-     * until the confirmation has committed.
-     */
     private static final class InterleavedInventory implements InventoryTransactionPersistence {
-
         private final InventoryTransactionPersistence delegate;
         private final Set<String> expirationWins;
         private final Map<String, Sinks.Empty<Void>> confirmationReady = new ConcurrentHashMap<>();
@@ -572,9 +537,7 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
         }
     }
 
-    /** No order of these races reaches the payment step. */
     private static final class NoChargesGateway implements PaymentGatewayChargeApi {
-
         @Override
         public Mono<PaymentOutcome> charge(PaymentChargeRequest request) {
             return Mono.error(new AssertionError("unexpected charge"));

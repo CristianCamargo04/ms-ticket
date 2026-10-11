@@ -45,7 +45,6 @@ import software.amazon.awssdk.services.dynamodb.model.UpdateItemResponse;
 
 @ExtendWith(MockitoExtension.class)
 class EventPersistenceImplTest {
-
     private static final Map<String, AttributeValue> LAST_KEY = Map.of(
             "eventId", AttributeValue.fromS(EVENT_ID),
             "status", AttributeValue.fromS("ON_SALE"),

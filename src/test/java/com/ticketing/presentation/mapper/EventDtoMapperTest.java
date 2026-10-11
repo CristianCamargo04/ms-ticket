@@ -17,7 +17,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class EventDtoMapperTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
     private static final Instant EVENT_DATE = Instant.parse("2027-01-01T20:00:00Z");
 

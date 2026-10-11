@@ -8,11 +8,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import reactor.core.publisher.Mono;
 
-/**
- * In-memory {@link EventPersistence} (strongly consistent reads, conditional status updates).
- */
 public final class InMemoryEventPersistence implements EventPersistence {
-
     private final InMemoryTicketingStore store;
 
     public InMemoryEventPersistence(InMemoryTicketingStore store) {

@@ -10,7 +10,6 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class TicketTransitionDataTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
 
     @Test

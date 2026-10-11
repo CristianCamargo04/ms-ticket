@@ -12,7 +12,6 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 class AvailabilitySnapshotTest {
-
     private static final Instant T0 = Instant.parse("2026-10-10T10:00:00Z");
     private static final AvailabilitySnapshot BASE = new AvailabilitySnapshot("e-1", 100, 50, 20, 10, 15, 5, T0);
 

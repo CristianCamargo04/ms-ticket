@@ -31,11 +31,7 @@ import software.amazon.awssdk.services.dynamodb.model.TimeToLiveSpecification;
 import software.amazon.awssdk.services.dynamodb.model.TimeToLiveStatus;
 import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveRequest;
 
-/**
- * Runs the real changelog and migration files against DynamoDB Local.
- */
 class DynamoMigrationRunnerIT {
-
     private static final Duration TIMEOUT = Duration.ofMinutes(2);
     private static final List<String> MIGRATION_IDS = List.of("20261010100000_TCK-001", "20261010100100_TCK-002",
             "20261010100200_TCK-003", "20261010100300_TCK-004", "20261010100400_TCK-005");
@@ -102,11 +98,6 @@ class DynamoMigrationRunnerIT {
                 .hasMessageContaining(MIGRATION_IDS.get(1));
     }
 
-    /**
-     * The table exists without its time to live (created outside the runner, or a previous run crashed between
-     * {@code CreateTable} and {@code UpdateTimeToLive}): creation is skipped but the time to live is still enabled
-     * before the migration is recorded.
-     */
     @Test
     void shouldSkipATableThatAlreadyExistsAndStillEnableItsTimeToLive() {
         AwsProperties.Tables tables = DynamoDbLocalContainer.uniqueTables();

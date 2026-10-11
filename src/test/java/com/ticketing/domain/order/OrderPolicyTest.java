@@ -9,7 +9,6 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class OrderPolicyTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
     private static final OrderPolicy POLICY = new OrderPolicy(Duration.ofMinutes(10), Duration.ofMinutes(5),
             Duration.ofSeconds(30), 10, 40, 3);

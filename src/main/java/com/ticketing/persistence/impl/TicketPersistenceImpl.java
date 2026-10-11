@@ -27,26 +27,14 @@ import software.amazon.awssdk.services.dynamodb.model.PutRequest;
 import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
 import software.amazon.awssdk.services.dynamodb.model.WriteRequest;
 
-/**
- * DynamoDB adapter of the {@code tickets} table.
- *
- * <p>Bulk generation uses {@code BatchWriteItem} (25 items per call, {@link EventPolicy#ticketWriteConcurrency()}
- * calls in flight) and re-submits {@code UnprocessedItems} with a bounded exponential backoff. Available tickets are
- * read from the {@code eventId-statusKey-index} GSI: a key-condition range on {@code statusKey}, so no filter
- * expression wastes read capacity on sold or held tickets.
- */
 @Repository
 public class TicketPersistenceImpl implements TicketPersistence {
-
-    /** Maximum items of one {@code BatchWriteItem} call. */
     static final int BATCH_WRITE_SIZE = 25;
 
-    /** Maximum keys of one {@code BatchGetItem} call. */
     static final int BATCH_GET_SIZE = 100;
 
     private static final String AVAILABLE_RANGE_START = TicketStatusEnum.AVAILABLE.name() + "#";
 
-    /** {@code '$'} sorts right after {@code '#'}, so this bound closes the range of every available ticket. */
     private static final String AVAILABLE_RANGE_END = TicketStatusEnum.AVAILABLE.name() + "$";
 
     private final DynamoDbAsyncClient dynamoDb;
@@ -55,14 +43,6 @@ public class TicketPersistenceImpl implements TicketPersistence {
     private final int writeConcurrency;
     private final BatchRetryPolicy retryPolicy = BatchRetryPolicy.DEFAULT;
 
-    /**
-     * Creates the adapter.
-     *
-     * @param dynamoDb    low-level client
-     * @param tableNames  physical table names
-     * @param mapper      ticket mapper
-     * @param eventPolicy provides the number of concurrent batch writes
-     */
     public TicketPersistenceImpl(DynamoDbAsyncClient dynamoDb, DynamoDbTableNames tableNames,
                                  TicketEntityMapper mapper, EventPolicy eventPolicy) {
         this.dynamoDb = dynamoDb;

@@ -26,7 +26,6 @@ import reactor.core.publisher.Flux;
 @WebFluxTest(controllers = TicketHistoryRestControllerImpl.class)
 @Import(RestControllerTestConfig.class)
 class TicketHistoryRestControllerImplTest {
-
     private static final String URI = "/api/v1/events/e-1/tickets/T-000001/transitions";
 
     @Autowired

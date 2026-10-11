@@ -22,36 +22,11 @@ import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledExcepti
 import software.amazon.awssdk.services.dynamodb.model.TransactionConflictException;
 import software.amazon.awssdk.services.dynamodb.model.TransactionInProgressException;
 
-/**
- * Translates the failure of an inventory {@code TransactWriteItems} into an {@link InventoryWriteOutcome} or a
- * retryable {@link InventoryConflictException} (implementation spec 6.3).
- *
- * <p>The transaction items have a fixed layout for {@code n} tickets: {@code [0]} event, {@code [1..n]} tickets,
- * {@code [n+1]} order, {@code [n+2..2n+1]} audit records, so the cancellation reasons (one per item, same order) are
- * mapped by index with this priority:
- * <ol>
- *     <li>order {@code ConditionalCheckFailed} → {@link InventoryWriteOutcome.OrderStateChanged}</li>
- *     <li>event {@code ConditionalCheckFailed} → {@link InventoryWriteOutcome.InsufficientInventory}</li>
- *     <li>any ticket {@code ConditionalCheckFailed} → {@link InventoryWriteOutcome.StaleTicketSelection}</li>
- *     <li>{@code TransactionConflict}, throttling, {@code InternalServerError}, an audit collision or no reason at
- *     all (no reasons, or only reasons whose {@code Code} is {@code None} or missing) → error
- *     {@link InventoryConflictException} (retryable; every item is conditional, so a retry is safe)</li>
- * </ol>
- * Outside cancellations, transient failures (transaction in progress/conflict, throttling, 5xx, API call timeouts and
- * client-side I/O failures) become {@link InventoryConflictException}; anything else propagates unchanged:
- * validation errors, {@code IdempotentParameterMismatchException}, bugs and client failures that are not I/O
- * (credentials that cannot be loaded, marshalling errors, {@link NonRetryableException}), so a misconfiguration is
- * never retried nor reported as an inventory conflict.
- */
 public final class TransactionCancellationTranslator {
-
-    /** Cancellation code of a failed condition expression. */
     public static final String CONDITIONAL_CHECK_FAILED = "ConditionalCheckFailed";
 
-    /** Cancellation code of an item that did not fail. */
     private static final String NO_FAILURE = "None";
 
-    /** Bound of the cause chain walk (guards against cyclic causes). */
     private static final int MAX_CAUSE_DEPTH = 16;
 
     private static final Set<String> TRANSIENT_CANCELLATION_CODES = Set.of(
@@ -61,14 +36,6 @@ public final class TransactionCancellationTranslator {
     private TransactionCancellationTranslator() {
     }
 
-    /**
-     * Translates a transaction failure.
-     *
-     * @param error       the failure signalled by the SDK (possibly wrapped in a {@link CompletionException})
-     * @param ticketCount number of tickets {@code n} of the transaction
-     * @param description operation and order, used in error messages (no sensitive data)
-     * @return the business outcome, or an error signal
-     */
     public static Mono<InventoryWriteOutcome> translate(Throwable error, int ticketCount, String description) {
         Throwable cause = unwrap(error);
         if (cause instanceof TransactionCanceledException canceled) {
@@ -80,13 +47,6 @@ public final class TransactionCancellationTranslator {
         return Mono.error(cause);
     }
 
-    /**
-     * Whether a non-transactional failure is transient and therefore safe to retry.
-     *
-     * @param error the unwrapped failure
-     * @return {@code true} for transaction conflicts, throttling, 5xx, API call (attempt) timeouts and client
-     *         failures caused by I/O or that the SDK marks retryable
-     */
     public static boolean isTransient(Throwable error) {
         if (error instanceof TransactionInProgressException || error instanceof TransactionConflictException
                 || error instanceof ProvisionedThroughputExceededException
@@ -99,13 +59,6 @@ public final class TransactionCancellationTranslator {
         return error instanceof SdkClientException clientException && isTransientClientFailure(clientException);
     }
 
-    /**
-     * Client-side failures worth retrying, mirroring the SDK's own retryable exceptions: timeouts, failures the SDK
-     * marks {@link SdkClientException#retryable() retryable} and failures caused (anywhere in the first
-     * {@value #MAX_CAUSE_DEPTH} levels of the cause chain) by I/O such as a
-     * reset connection, a read timeout or a connection pool acquire timeout. Everything else (missing credentials,
-     * marshalling errors, {@link NonRetryableException}) is a configuration or programming error.
-     */
     private static boolean isTransientClientFailure(SdkClientException error) {
         if (error instanceof NonRetryableException) {
             return false;

@@ -61,13 +61,11 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebInputException;
 
 class GlobalErrorHandlerTest {
-
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
 
     private GlobalErrorHandler handler;
     private MockServerWebExchange exchange;
 
-    /** A business exception carrying the internal error code (its message must never reach the client). */
     private static final class InternalTestException extends TicketingException {
         InternalTestException() {
             super(ErrorCodeEnum.INTERNAL_ERROR, "jdbc password=secret");
@@ -81,7 +79,7 @@ class GlobalErrorHandlerTest {
         exchange.getAttributes().put(RequestContext.CORRELATION_ID_KEY, "corr-1");
     }
 
-    @SuppressWarnings("unused") // target of the method parameters used to build binding exceptions
+    @SuppressWarnings("unused")
     private void sample(String quantity) {
     }
 
@@ -282,8 +280,4 @@ class GlobalErrorHandlerTest {
         assertThat(response.getBody().toString()).doesNotContain("ticketing-orders");
     }
 
-    @Test
-    void shouldRequireTheProblemFactory() {
-        assertThatNullPointerException().isThrownBy(() -> new GlobalErrorHandler(null));
-    }
 }

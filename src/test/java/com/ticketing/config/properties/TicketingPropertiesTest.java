@@ -19,7 +19,6 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 
 class TicketingPropertiesTest {
-
     private static void assertSpecDefaults(TicketingProperties properties) {
         assertThat(properties.runtimeMode()).isEqualTo(RuntimeModeEnum.ALL);
 
@@ -196,7 +195,6 @@ class TicketingPropertiesTest {
         assertThat(local.bind("server.forward-headers-strategy", String.class).isBound()).isFalse();
     }
 
-    /** The variables the Terraform task definitions inject (infra/terraform/envs/{dev,prod}/main.tf), nothing else. */
     private static Map<String, Object> terraformEnvironment() {
         Map<String, Object> variables = new HashMap<>();
         variables.put("AWS_REGION", "eu-west-1");
@@ -220,10 +218,6 @@ class TicketingPropertiesTest {
         return variables;
     }
 
-    /**
-     * An environment like the one of an ECS task: the injected variables (as a plain source, so only placeholder
-     * resolution is exercised, not relaxed binding) on top of the common and {@code prod} documents of {@code application.yml}.
-     */
     private static StandardEnvironment awsEnvironment(String profile) {
         StandardEnvironment environment = new StandardEnvironment();
         environment.getPropertySources().remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);
@@ -239,7 +233,6 @@ class TicketingPropertiesTest {
     void shouldResolveEveryAwsProfilePlaceholderWithTheVariablesTerraformInjects() {
         StandardEnvironment environment = awsEnvironment("prod");
 
-        // strict resolution, like Spring Boot's auto-configuration conditions: an unresolvable placeholder throws
         assertThat(environment.getRequiredProperty("spring.security.oauth2.resourceserver.jwt.issuer-uri"))
                 .isEqualTo("https://cognito-idp.eu-west-1.amazonaws.com/pool");
         assertThat(environment.getRequiredProperty("spring.security.oauth2.resourceserver.jwt.jwk-set-uri"))
