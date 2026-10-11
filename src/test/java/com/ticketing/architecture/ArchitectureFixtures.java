@@ -125,10 +125,14 @@ final class ArchitectureFixtures {
         return DescribedPredicate.describe("not annotation", javaClass -> !javaClass.isAnnotation());
     }
 
+    private static final java.util.regex.Pattern GENERATED_MAPPER =
+            java.util.regex.Pattern.compile(".*/mapper/[A-Za-z0-9]+MapperImpl[.]class");
+
     private static final class ProductionClasses {
         private static final JavaClasses INSTANCE = new ClassFileImporter()
                 .withImportOption(new ImportOption.DoNotIncludeTests())
                 .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_PACKAGE_INFOS)
+                .withImportOption(location -> !location.matches(GENERATED_MAPPER))
                 .importPackages(BASE_PACKAGE);
     }
 

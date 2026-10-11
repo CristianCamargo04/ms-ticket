@@ -1,4 +1,4 @@
-package com.ticketing.persistence.impl.mapper;
+package com.ticketing.persistence.mapper;
 
 import static com.ticketing.persistence.PersistenceFixtures.EVENT_ID;
 import static com.ticketing.persistence.PersistenceFixtures.NOW;
@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 class TicketEntityMapperTest {
-    private final TicketEntityMapper mapper = new TicketEntityMapper();
+    private final TicketEntityMapper mapper = TicketEntityMapper.INSTANCE;
 
     @Test
     void shouldDeriveTheAvailabilityIndexSortKey() {

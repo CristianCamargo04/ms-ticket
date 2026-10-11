@@ -10,7 +10,7 @@ import com.ticketing.domain.exception.DomainValidationException;
 import com.ticketing.enums.EventStatusEnum;
 import com.ticketing.persistence.EventPersistence;
 import com.ticketing.persistence.entity.EventEntity;
-import com.ticketing.persistence.impl.mapper.EventEntityMapper;
+import com.ticketing.persistence.mapper.EventEntityMapper;
 import com.ticketing.persistence.impl.support.CursorCodec;
 import com.ticketing.persistence.impl.support.DynamoDbTableNames;
 import com.ticketing.persistence.impl.support.EntitySchemas;

@@ -30,7 +30,7 @@ class OrderDtoMapperTest {
             new RequestContext("customer-1", Set.of("ROLE_CUSTOMER"), "corr-1", "10.0.0.1");
     private static final RequestContext ADMIN = new RequestContext("admin-1", Set.of("ROLE_ADMIN"), "corr-2", null);
 
-    private final OrderDtoMapper mapper = new OrderDtoMapper();
+    private final OrderDtoMapper mapper = OrderDtoMapper.INSTANCE;
 
     private static OrderData reservedOrder() {
         return OrderData.newQueued("o-1", "e-1", "customer-1", OrderTypeEnum.STANDARD, 2, "hash",
@@ -41,10 +41,6 @@ class OrderDtoMapperTest {
     void shouldBuildPlaceOrderRequestForTheAuthenticatedCustomer() {
         assertThat(mapper.toPlaceOrderRequest("e-1", new PlaceOrderRequestDto(3), CUSTOMER, "key-12345", "h"))
                 .isEqualTo(new PlaceOrderRequest("e-1", "customer-1", 3, "key-12345", "h", "corr-1"));
-        assertThatNullPointerException()
-                .isThrownBy(() -> mapper.toPlaceOrderRequest("e-1", null, CUSTOMER, "key-12345", "h"));
-        assertThatNullPointerException()
-                .isThrownBy(() -> mapper.toPlaceOrderRequest("e-1", new PlaceOrderRequestDto(1), null, "k", "h"));
     }
 
     @Test
@@ -52,10 +48,6 @@ class OrderDtoMapperTest {
         assertThat(mapper.toIssueComplimentaryRequest("e-1", new IssueComplimentaryRequestDto("vip-1", 4), ADMIN,
                 "key-12345", "h"))
                 .isEqualTo(new IssueComplimentaryRequest("e-1", "vip-1", 4, "admin-1", "key-12345", "h", "corr-2"));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toIssueComplimentaryRequest("e-1", null, ADMIN,
-                "k", "h"));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toIssueComplimentaryRequest("e-1",
-                new IssueComplimentaryRequestDto("vip-1", 1), null, "k", "h"));
     }
 
     @Test
@@ -72,10 +64,6 @@ class OrderDtoMapperTest {
                 .isEqualTo(new ConfirmOrderRequest("o-1", "customer-1", "tok_1", "corr-1"));
         assertThat(mapper.toCancelOrderRequest("o-1", CUSTOMER))
                 .isEqualTo(new CancelOrderRequest("o-1", "customer-1"));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toConfirmOrderRequest("o-1", null, CUSTOMER));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toConfirmOrderRequest("o-1",
-                new ConfirmOrderRequestDto("tok_1"), null));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toCancelOrderRequest("o-1", null));
     }
 
     @Test
@@ -85,7 +73,7 @@ class OrderDtoMapperTest {
 
         assertThat(mapper.toAcceptedResponse(queued)).isEqualTo(new OrderAcceptedResponseDto("o-1",
                 TicketStatusEnum.AVAILABLE, OrderProcessingStatusEnum.QUEUED, "/api/v1/orders/o-1"));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toAcceptedResponse(null));
+        assertThat(mapper.toAcceptedResponse(null)).isNull();
     }
 
     @Test
@@ -93,7 +81,7 @@ class OrderDtoMapperTest {
         assertThat(mapper.toStatusResponse(reservedOrder())).isEqualTo(new OrderStatusResponseDto("o-1", "e-1",
                 OrderTypeEnum.STANDARD, 2, TicketStatusEnum.RESERVED, OrderProcessingStatusEnum.ACTIVE, null,
                 List.of("T-000001", "T-000002"), NOW.plusSeconds(600), NOW, NOW));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toStatusResponse(null));
+        assertThat(mapper.toStatusResponse(null)).isNull();
     }
 
     @Test

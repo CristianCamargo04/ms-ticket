@@ -20,7 +20,7 @@ class EventDtoMapperTest {
     private static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
     private static final Instant EVENT_DATE = Instant.parse("2027-01-01T20:00:00Z");
 
-    private final EventDtoMapper mapper = new EventDtoMapper();
+    private final EventDtoMapper mapper = EventDtoMapper.INSTANCE;
 
     private static EventData event(String eventId) {
         return new EventData(eventId, "Concert", "Arena", EVENT_DATE, 100, new BigDecimal("49.90"), "USD",
@@ -34,7 +34,7 @@ class EventDtoMapperTest {
 
         assertThat(mapper.toCreateEventRequest(dto)).isEqualTo(new CreateEventRequest("Concert", "Arena", EVENT_DATE,
                 100, new BigDecimal("49.90"), "USD"));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toCreateEventRequest(null));
+        assertThat(mapper.toCreateEventRequest(null)).isNull();
     }
 
     @Test
@@ -49,7 +49,7 @@ class EventDtoMapperTest {
     void shouldMapAnEventExposingItsAvailableTickets() {
         assertThat(mapper.toResponse(event("e-1"))).isEqualTo(new EventResponseDto("e-1", "Concert", "Arena",
                 EVENT_DATE, 100, new BigDecimal("49.90"), "USD", EventStatusEnum.ON_SALE, 90, NOW));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toResponse(null));
+        assertThat(mapper.toResponse(null)).isNull();
     }
 
     @Test
@@ -60,6 +60,6 @@ class EventDtoMapperTest {
         assertThat(page.items()).extracting(EventResponseDto::eventId).containsExactly("e-1", "e-2");
         assertThat(page.nextCursor()).isEqualTo("cursor-2");
         assertThat(mapper.toPageResponse(PageData.empty())).isEqualTo(new PageResponseDto<>(List.of(), null));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toPageResponse(null));
+        assertThat(mapper.toPageResponse(null)).isNull();
     }
 }

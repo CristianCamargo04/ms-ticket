@@ -2,7 +2,7 @@ package com.ticketing.client.rest.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.ticketing.client.mapper.PaymentGatewayChargeClientMapper;
+import com.ticketing.client.mapper.PaymentGatewayChargeClientMapperImpl;
 import com.ticketing.client.rest.api.PaymentGatewayChargeApi;
 import com.ticketing.config.client.PaymentGatewayClientConfig;
 import com.ticketing.config.properties.TicketingProperties;
@@ -79,7 +79,7 @@ class PaymentGatewayChargeClientImplIT {
         new ApplicationContextRunner()
                 .withUserConfiguration(PropertiesConfig.class, PaymentGatewayClientConfig.class, ResilienceConfig.class)
                 .withBean(JsonMapper.class, () -> JsonMapper.builder().build())
-                .withBean(PaymentGatewayChargeClientMapper.class)
+                .withBean(PaymentGatewayChargeClientMapperImpl.class)
                 .withBean(PaymentGatewayChargeClientImpl.class)
                 .withPropertyValues(
                         "ticketing.payment.base-url=" + baseUrl(),

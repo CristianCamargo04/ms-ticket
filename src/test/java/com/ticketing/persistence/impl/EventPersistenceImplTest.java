@@ -15,7 +15,7 @@ import static org.mockito.Mockito.when;
 import com.ticketing.domain.data.EventData;
 import com.ticketing.domain.exception.DomainValidationException;
 import com.ticketing.enums.EventStatusEnum;
-import com.ticketing.persistence.impl.mapper.EventEntityMapper;
+import com.ticketing.persistence.mapper.EventEntityMapper;
 import com.ticketing.persistence.impl.support.CursorCodec;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -53,7 +53,7 @@ class EventPersistenceImplTest {
     @Mock
     private DynamoDbAsyncClient dynamoDb;
 
-    private final EventEntityMapper mapper = new EventEntityMapper();
+    private final EventEntityMapper mapper = EventEntityMapper.INSTANCE;
     private EventPersistenceImpl persistence;
 
     @BeforeEach

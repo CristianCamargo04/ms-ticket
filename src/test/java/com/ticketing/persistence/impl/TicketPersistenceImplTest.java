@@ -15,7 +15,7 @@ import static org.mockito.Mockito.when;
 import com.ticketing.domain.data.TicketData;
 import com.ticketing.domain.event.EventPolicy;
 import com.ticketing.domain.exception.InventoryConflictException;
-import com.ticketing.persistence.impl.mapper.TicketEntityMapper;
+import com.ticketing.persistence.mapper.TicketEntityMapper;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -48,7 +48,7 @@ class TicketPersistenceImplTest {
     @Mock
     private DynamoDbAsyncClient dynamoDb;
 
-    private final TicketEntityMapper mapper = new TicketEntityMapper();
+    private final TicketEntityMapper mapper = TicketEntityMapper.INSTANCE;
     private TicketPersistenceImpl persistence;
 
     @BeforeEach

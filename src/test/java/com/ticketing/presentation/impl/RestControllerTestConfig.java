@@ -12,10 +12,10 @@ import com.ticketing.presentation.impl.error.GlobalErrorHandler;
 import com.ticketing.presentation.impl.error.ProblemDetailFactory;
 import com.ticketing.presentation.impl.idempotency.IdempotencyKeyResolver;
 import com.ticketing.presentation.impl.idempotency.RequestFingerprintCalculator;
-import com.ticketing.presentation.mapper.AvailabilityDtoMapper;
-import com.ticketing.presentation.mapper.EventDtoMapper;
-import com.ticketing.presentation.mapper.OrderDtoMapper;
-import com.ticketing.presentation.mapper.TicketTransitionDtoMapper;
+import com.ticketing.presentation.mapper.AvailabilityDtoMapperImpl;
+import com.ticketing.presentation.mapper.EventDtoMapperImpl;
+import com.ticketing.presentation.mapper.OrderDtoMapperImpl;
+import com.ticketing.presentation.mapper.TicketTransitionDtoMapperImpl;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -29,8 +29,8 @@ import org.springframework.context.annotation.Import;
 @Import({SecurityConfig.class, JwtRoleConverter.class, SecurityProblemHandler.class, GlobalErrorHandler.class,
         ProblemDetailFactory.class, ProblemDetailResponseWriter.class, CorrelationIdWebFilter.class,
         WebFluxConfig.class, RequestContextResolverImpl.class, IdempotencyKeyResolver.class,
-        RequestFingerprintCalculator.class, EventDtoMapper.class, AvailabilityDtoMapper.class, OrderDtoMapper.class,
-        TicketTransitionDtoMapper.class})
+        RequestFingerprintCalculator.class, EventDtoMapperImpl.class, AvailabilityDtoMapperImpl.class, OrderDtoMapperImpl.class,
+        TicketTransitionDtoMapperImpl.class})
 public class RestControllerTestConfig {
     public static final Instant NOW = Instant.parse("2026-10-10T10:00:00Z");
 

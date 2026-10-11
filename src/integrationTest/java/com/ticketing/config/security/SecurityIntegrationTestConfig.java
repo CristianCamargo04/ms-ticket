@@ -9,7 +9,7 @@ import com.ticketing.presentation.impl.error.GlobalErrorHandler;
 import com.ticketing.presentation.impl.error.ProblemDetailFactory;
 import com.ticketing.presentation.impl.idempotency.IdempotencyKeyResolver;
 import com.ticketing.presentation.impl.idempotency.RequestFingerprintCalculator;
-import com.ticketing.presentation.mapper.OrderDtoMapper;
+import com.ticketing.presentation.mapper.OrderDtoMapperImpl;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -21,7 +21,7 @@ import org.springframework.context.annotation.Import;
 @Import({SecurityConfig.class, JwtRoleConverter.class, SecurityProblemHandler.class, GlobalErrorHandler.class,
         ProblemDetailFactory.class, ProblemDetailResponseWriter.class, CorrelationIdWebFilter.class,
         WebFluxConfig.class, RequestContextResolverImpl.class, IdempotencyKeyResolver.class,
-        RequestFingerprintCalculator.class, OrderDtoMapper.class})
+        RequestFingerprintCalculator.class, OrderDtoMapperImpl.class})
 class SecurityIntegrationTestConfig {
     @Bean
     Clock clock() {

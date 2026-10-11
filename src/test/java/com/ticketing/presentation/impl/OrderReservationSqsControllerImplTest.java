@@ -61,7 +61,7 @@ class OrderReservationSqsControllerImplTest {
     void setUp() {
         controller = new OrderReservationSqsControllerImpl(
                 new JsonMessageReader(JsonMapper.builder().build(), validatorFactory.getValidator()),
-                new OrderMessageDtoMapper(), reserveTicketsUseCase);
+                OrderMessageDtoMapper.INSTANCE, reserveTicketsUseCase);
     }
 
     private static OrderData reservedOrder() {

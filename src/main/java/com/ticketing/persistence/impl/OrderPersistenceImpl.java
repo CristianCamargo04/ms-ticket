@@ -9,7 +9,7 @@ import com.ticketing.enums.DeadlineTypeEnum;
 import com.ticketing.enums.OrderProcessingStatusEnum;
 import com.ticketing.persistence.OrderPersistence;
 import com.ticketing.persistence.entity.OrderEntity;
-import com.ticketing.persistence.impl.mapper.OrderEntityMapper;
+import com.ticketing.persistence.mapper.OrderEntityMapper;
 import com.ticketing.persistence.impl.support.DeadlinePartitioner;
 import com.ticketing.persistence.impl.support.DynamoDbTableNames;
 import com.ticketing.persistence.impl.support.EntitySchemas;
@@ -59,7 +59,7 @@ public class OrderPersistenceImpl implements OrderPersistence {
     public Mono<Boolean> insertIfAbsent(OrderData order) {
         return Mono.fromFuture(() -> dynamoDb.putItem(PutItemRequest.builder()
                         .tableName(tableName)
-                        .item(mapper.toItem(order))
+                        .item(mapper.toItem(order, partitioner))
                         .conditionExpression("attribute_not_exists(orderId)")
                         .build()))
                 .thenReturn(true)

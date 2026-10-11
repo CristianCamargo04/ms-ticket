@@ -9,7 +9,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class AvailabilityDtoMapperTest {
-    private final AvailabilityDtoMapper mapper = new AvailabilityDtoMapper();
+    private final AvailabilityDtoMapper mapper = AvailabilityDtoMapper.INSTANCE;
 
     @Test
     void shouldMapEveryCounter() {
@@ -21,6 +21,6 @@ class AvailabilityDtoMapperTest {
 
     @Test
     void shouldRejectNull() {
-        assertThatNullPointerException().isThrownBy(() -> mapper.toResponse(null));
+        assertThat(mapper.toResponse(null)).isNull();
     }
 }

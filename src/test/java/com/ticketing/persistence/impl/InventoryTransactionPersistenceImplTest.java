@@ -31,8 +31,8 @@ import com.ticketing.enums.OrderProcessingStatusEnum;
 import com.ticketing.enums.OrderTypeEnum;
 import com.ticketing.enums.TicketStatusEnum;
 import com.ticketing.enums.TransitionReasonEnum;
-import com.ticketing.persistence.impl.mapper.OrderEntityMapper;
-import com.ticketing.persistence.impl.mapper.TicketTransitionEntityMapper;
+import com.ticketing.persistence.mapper.OrderEntityMapper;
+import com.ticketing.persistence.mapper.TicketTransitionEntityMapper;
 import com.ticketing.persistence.impl.support.DeadlinePartitioner;
 import java.time.Duration;
 import java.time.Instant;
@@ -81,7 +81,7 @@ class InventoryTransactionPersistenceImplTest {
     @BeforeEach
     void setUp() {
         persistence = new InventoryTransactionPersistenceImpl(dynamoDb, TABLES, partitioner,
-                new TicketTransitionEntityMapper(), () -> NONCE);
+                TicketTransitionEntityMapper.INSTANCE, () -> NONCE);
     }
 
     @Test
@@ -294,12 +294,12 @@ class InventoryTransactionPersistenceImplTest {
     @MethodSource("subMillisecondCommands")
     void shouldReturnTheAppliedOrderWithTheStoragePrecision(InventoryCommand command) {
         committed();
-        OrderEntityMapper orderMapper = new OrderEntityMapper(partitioner);
+        OrderEntityMapper orderMapper = OrderEntityMapper.INSTANCE;
 
         StepVerifier.create(execute(command))
                 .assertNext(outcome -> {
                     OrderData applied = ((InventoryWriteOutcome.Applied) outcome).order();
-                    assertThat(applied).isEqualTo(orderMapper.fromItem(orderMapper.toItem(applied)));
+                    assertThat(applied).isEqualTo(orderMapper.fromItem(orderMapper.toItem(applied, partitioner)));
                     assertThat(applied.updatedAt()).isEqualTo(STORED_NOW);
                     assertThat(applied.version()).isEqualTo(command.order().version() + 1);
                     if (applied.holdExpiresAt() != null) {
@@ -357,7 +357,7 @@ class InventoryTransactionPersistenceImplTest {
     void shouldUseARandomNonceWithThePublicConstructor() {
         committed();
         InventoryTransactionPersistenceImpl randomNonce = new InventoryTransactionPersistenceImpl(dynamoDb, TABLES,
-                partitioner, new TicketTransitionEntityMapper());
+                partitioner, TicketTransitionEntityMapper.INSTANCE);
         OrderData order = queuedOrder(OrderTypeEnum.STANDARD, 2);
         ReserveInventoryCommand command = new ReserveInventoryCommand(order, TICKETS, HOLD_EXPIRES_AT, NOW, "worker");
 

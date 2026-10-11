@@ -1,4 +1,4 @@
-package com.ticketing.persistence.impl.mapper;
+package com.ticketing.persistence.mapper;
 
 import static com.ticketing.persistence.PersistenceFixtures.event;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 class EventEntityMapperTest {
-    private final EventEntityMapper mapper = new EventEntityMapper();
+    private final EventEntityMapper mapper = EventEntityMapper.INSTANCE;
 
     @Test
     void shouldStoreInstantsAsEpochMillisAndMoneyAsPlainString() {

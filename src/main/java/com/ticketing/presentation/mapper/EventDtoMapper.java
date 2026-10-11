@@ -8,30 +8,33 @@ import com.ticketing.enums.EventStatusEnum;
 import com.ticketing.presentation.dto.CreateEventRequestDto;
 import com.ticketing.presentation.dto.EventResponseDto;
 import com.ticketing.presentation.dto.PageResponseDto;
-import java.util.Objects;
-import org.springframework.stereotype.Component;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.NullValueCheckStrategy;
+import org.mapstruct.NullValuePropertyMappingStrategy;
+import org.mapstruct.factory.Mappers;
 
-@Component
-public class EventDtoMapper {
-    public CreateEventRequest toCreateEventRequest(CreateEventRequestDto dto) {
-        Objects.requireNonNull(dto, "dto");
-        return new CreateEventRequest(dto.name(), dto.venue(), dto.eventDate(), dto.totalCapacity(),
-                dto.ticketPrice(), dto.currency());
-    }
+@Mapper(
+        componentModel = "spring",
+        nullValueCheckStrategy = NullValueCheckStrategy.ALWAYS,
+        nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
+public interface EventDtoMapper {
 
-    public ListEventsRequest toListEventsRequest(EventStatusEnum status, int limit, String cursor) {
+    EventDtoMapper INSTANCE = Mappers.getMapper(EventDtoMapper.class);
+
+    CreateEventRequest toCreateEventRequest(CreateEventRequestDto dto);
+
+    @Mapping(target = "availableTickets", source = "availableCount")
+    EventResponseDto toResponse(EventData event);
+
+    default ListEventsRequest toListEventsRequest(EventStatusEnum status, int limit, String cursor) {
         return new ListEventsRequest(status, limit, cursor == null || cursor.isBlank() ? null : cursor);
     }
 
-    public EventResponseDto toResponse(EventData event) {
-        Objects.requireNonNull(event, "event");
-        return new EventResponseDto(event.eventId(), event.name(), event.venue(), event.eventDate(),
-                event.totalCapacity(), event.ticketPrice(), event.currency(), event.status(),
-                event.availableCount(), event.createdAt());
-    }
-
-    public PageResponseDto<EventResponseDto> toPageResponse(PageData<EventData> page) {
-        Objects.requireNonNull(page, "page");
+    default PageResponseDto<EventResponseDto> toPageResponse(PageData<EventData> page) {
+        if (page == null) {
+            return null;
+        }
         return new PageResponseDto<>(page.items().stream().map(this::toResponse).toList(), page.nextCursor());
     }
 }

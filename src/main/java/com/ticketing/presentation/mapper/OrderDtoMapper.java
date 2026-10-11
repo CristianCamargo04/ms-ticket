@@ -14,61 +14,59 @@ import com.ticketing.presentation.dto.OrderStatusResponseDto;
 import com.ticketing.presentation.dto.PlaceOrderRequestDto;
 import java.net.URI;
 import java.util.Objects;
-import org.springframework.stereotype.Component;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.Named;
+import org.mapstruct.NullValueCheckStrategy;
+import org.mapstruct.NullValuePropertyMappingStrategy;
+import org.mapstruct.factory.Mappers;
 import org.springframework.web.util.UriComponentsBuilder;
 
-@Component
-public class OrderDtoMapper {
-    public static final String ORDER_STATUS_PATH = "/api/v1/orders/{orderId}";
+@Mapper(
+        componentModel = "spring",
+        nullValueCheckStrategy = NullValueCheckStrategy.ALWAYS,
+        nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
+public interface OrderDtoMapper {
 
-    public PlaceOrderRequest toPlaceOrderRequest(String eventId, PlaceOrderRequestDto dto, RequestContext context,
-                                                 String idempotencyKey, String requestHash) {
-        Objects.requireNonNull(dto, "dto");
-        Objects.requireNonNull(context, "context");
-        return new PlaceOrderRequest(eventId, context.subject(), dto.quantity(), idempotencyKey, requestHash,
-                context.correlationId());
-    }
+    OrderDtoMapper INSTANCE = Mappers.getMapper(OrderDtoMapper.class);
 
-    public IssueComplimentaryRequest toIssueComplimentaryRequest(String eventId, IssueComplimentaryRequestDto dto,
-                                                                 RequestContext context, String idempotencyKey,
-                                                                 String requestHash) {
-        Objects.requireNonNull(dto, "dto");
-        Objects.requireNonNull(context, "context");
-        return new IssueComplimentaryRequest(eventId, dto.beneficiaryId(), dto.quantity(), context.subject(),
-                idempotencyKey, requestHash, context.correlationId());
-    }
+    String ORDER_STATUS_PATH = "/api/v1/orders/{orderId}";
 
-    public GetOrderRequest toGetOrderRequest(String orderId, RequestContext context) {
-        Objects.requireNonNull(context, "context");
-        return new GetOrderRequest(orderId, context.subject(), context.isAdmin());
-    }
+    @Mapping(target = "customerId", source = "context.subject")
+    @Mapping(target = "quantity", source = "dto.quantity")
+    @Mapping(target = "correlationId", source = "context.correlationId")
+    PlaceOrderRequest toPlaceOrderRequest(String eventId, PlaceOrderRequestDto dto, RequestContext context,
+                                          String idempotencyKey, String requestHash);
 
-    public ConfirmOrderRequest toConfirmOrderRequest(String orderId, ConfirmOrderRequestDto dto,
-                                                     RequestContext context) {
-        Objects.requireNonNull(dto, "dto");
-        Objects.requireNonNull(context, "context");
-        return new ConfirmOrderRequest(orderId, context.subject(), dto.paymentToken(), context.correlationId());
-    }
+    @Mapping(target = "beneficiaryId", source = "dto.beneficiaryId")
+    @Mapping(target = "quantity", source = "dto.quantity")
+    @Mapping(target = "issuedBy", source = "context.subject")
+    @Mapping(target = "correlationId", source = "context.correlationId")
+    IssueComplimentaryRequest toIssueComplimentaryRequest(String eventId, IssueComplimentaryRequestDto dto,
+                                                          RequestContext context, String idempotencyKey,
+                                                          String requestHash);
 
-    public CancelOrderRequest toCancelOrderRequest(String orderId, RequestContext context) {
-        Objects.requireNonNull(context, "context");
-        return new CancelOrderRequest(orderId, context.subject());
-    }
+    @Mapping(target = "requesterId", source = "context.subject")
+    @Mapping(target = "privileged", expression = "java(context.isAdmin())")
+    GetOrderRequest toGetOrderRequest(String orderId, RequestContext context);
 
-    public OrderAcceptedResponseDto toAcceptedResponse(OrderData order) {
-        Objects.requireNonNull(order, "order");
-        return new OrderAcceptedResponseDto(order.orderId(), order.ticketStatus(), order.processingStatus(),
-                statusUri(order.orderId()).toString());
-    }
+    @Mapping(target = "customerId", source = "context.subject")
+    @Mapping(target = "paymentToken", source = "dto.paymentToken")
+    @Mapping(target = "correlationId", source = "context.correlationId")
+    ConfirmOrderRequest toConfirmOrderRequest(String orderId, ConfirmOrderRequestDto dto, RequestContext context);
 
-    public OrderStatusResponseDto toStatusResponse(OrderData order) {
-        Objects.requireNonNull(order, "order");
-        return new OrderStatusResponseDto(order.orderId(), order.eventId(), order.type(), order.quantity(),
-                order.ticketStatus(), order.processingStatus(), order.reason(), order.ticketIds(),
-                order.holdExpiresAt(), order.createdAt(), order.updatedAt());
-    }
+    @Mapping(target = "customerId", source = "context.subject")
+    CancelOrderRequest toCancelOrderRequest(String orderId, RequestContext context);
 
-    public URI statusUri(String orderId) {
+    @Mapping(target = "status", source = "ticketStatus")
+    @Mapping(target = "statusUrl", expression = "java(statusUri(order.orderId()).toString())")
+    OrderAcceptedResponseDto toAcceptedResponse(OrderData order);
+
+    @Mapping(target = "status", source = "ticketStatus")
+    OrderStatusResponseDto toStatusResponse(OrderData order);
+
+    @Named("statusUri")
+    default URI statusUri(String orderId) {
         Objects.requireNonNull(orderId, "orderId");
         return UriComponentsBuilder.fromPath(ORDER_STATUS_PATH).encode().buildAndExpand(orderId).toUri();
     }

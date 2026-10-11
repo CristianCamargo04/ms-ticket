@@ -21,7 +21,7 @@ import tools.jackson.databind.json.JsonMapper;
 class SqsOrderQueueClientMapperTest {
     private static final Instant OCCURRED_AT = Instant.parse("2026-10-10T12:00:00.123Z");
 
-    private final SqsOrderQueueClientMapper mapper = new SqsOrderQueueClientMapper();
+    private final SqsOrderQueueClientMapper mapper = SqsOrderQueueClientMapper.INSTANCE;
 
     private static boolean isSchemaValidCorrelationId(String correlationId) {
         return correlationId != null
@@ -120,8 +120,8 @@ class SqsOrderQueueClientMapperTest {
 
     @Test
     void shouldRejectNullArguments() {
-        assertThatNullPointerException().isThrownBy(() -> mapper.toDto((OrderReservationMessage) null));
-        assertThatNullPointerException().isThrownBy(() -> mapper.toDto((PaymentRequestedMessage) null));
+        assertThat(mapper.toDto((OrderReservationMessage) null)).isNull();
+        assertThat(mapper.toDto((PaymentRequestedMessage) null)).isNull();
         assertThatNullPointerException().isThrownBy(() -> mapper.toMessageAttributes(null, "corr-1"));
         assertThatNullPointerException()
                 .isThrownBy(() -> mapper.toMessageAttributes(MessageTypeEnum.PAYMENT_REQUESTED, null));

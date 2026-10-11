@@ -15,7 +15,7 @@ import static org.mockito.Mockito.when;
 import com.ticketing.domain.data.TicketTransitionData;
 import com.ticketing.enums.TicketStatusEnum;
 import com.ticketing.enums.TransitionReasonEnum;
-import com.ticketing.persistence.impl.mapper.TicketTransitionEntityMapper;
+import com.ticketing.persistence.mapper.TicketTransitionEntityMapper;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +41,7 @@ class TicketTransitionPersistenceImplTest {
     @Mock
     private DynamoDbAsyncClient dynamoDb;
 
-    private final TicketTransitionEntityMapper mapper = new TicketTransitionEntityMapper();
+    private final TicketTransitionEntityMapper mapper = TicketTransitionEntityMapper.INSTANCE;
     private TicketTransitionPersistenceImpl persistence;
 
     @BeforeEach
