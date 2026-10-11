@@ -8,6 +8,7 @@ import com.ticketing.presentation.EventRestController;
 import com.ticketing.presentation.dto.CreateEventRequestDto;
 import com.ticketing.presentation.dto.EventResponseDto;
 import com.ticketing.presentation.dto.PageResponseDto;
+import com.ticketing.presentation.impl.support.ResourceIdValidator;
 import com.ticketing.presentation.mapper.EventDtoMapper;
 import java.net.URI;
 import java.util.Objects;
@@ -18,7 +19,7 @@ import reactor.core.publisher.Mono;
 
 /**
  * Events endpoints; the mappings, {@code @Valid} and binding annotations are inherited from
- * {@link EventRestController}.
+ * {@link EventRestController}. Path identifiers are checked by {@link ResourceIdValidator}.
  */
 @RestController
 public class EventRestControllerImpl implements EventRestController {
@@ -61,7 +62,9 @@ public class EventRestControllerImpl implements EventRestController {
 
     @Override
     public Mono<EventResponseDto> getEvent(String eventId) {
-        return Mono.defer(() -> getEventUseCase.execute(eventId)).map(mapper::toResponse);
+        return Mono.fromCallable(() -> ResourceIdValidator.requireValid(ResourceIdValidator.EVENT_ID, eventId))
+                .flatMap(getEventUseCase::execute)
+                .map(mapper::toResponse);
     }
 
     private static URI eventUri(String eventId) {

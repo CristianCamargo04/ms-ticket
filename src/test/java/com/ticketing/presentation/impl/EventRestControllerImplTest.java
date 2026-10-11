@@ -25,6 +25,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webflux.test.autoconfigure.WebFluxTest;
@@ -322,6 +324,32 @@ class EventRestControllerImplTest {
                 .jsonPath("$.errorCode").isEqualTo("EVENT_NOT_FOUND")
                 .jsonPath("$.correlationId").isEqualTo("corr-123")
                 .jsonPath("$.instance").isEqualTo("/api/v1/events/missing");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"bad_id", "e 1", "e.1"})
+    void shouldRejectMalformedEventIdsBeforeCallingTheUseCase(String eventId) {
+        webTestClient.get().uri(EVENTS + "/{eventId}", eventId)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("VALIDATION_ERROR")
+                .jsonPath("$.detail").isEqualTo(
+                        "The path parameter 'eventId' must contain 1 to 64 letters, digits or dashes");
+        verifyNoInteractions(getEventUseCase);
+    }
+
+    @Test
+    void shouldRejectIdsLongerThanADynamoDbKeyAsClientErrors() {
+        webTestClient.get().uri(EVENTS + "/{eventId}", "a".repeat(2049))
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("VALIDATION_ERROR")
+                .jsonPath("$.detail").isEqualTo(
+                        "The path parameter 'eventId' must contain 1 to 64 letters, digits or dashes");
+        verifyNoInteractions(getEventUseCase);
     }
 
     @Test

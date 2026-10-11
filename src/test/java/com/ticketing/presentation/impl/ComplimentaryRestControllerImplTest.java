@@ -120,6 +120,19 @@ class ComplimentaryRestControllerImplTest {
     }
 
     @Test
+    void shouldRejectMalformedEventIds() {
+        webTestClient.mutateWith(admin(ADMIN)).post()
+                .uri("/api/v1/events/{eventId}/complimentary-tickets", "a".repeat(65))
+                .header(OrderRestController.IDEMPOTENCY_KEY_HEADER, KEY)
+                .contentType(MediaType.APPLICATION_JSON).bodyValue(BODY)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("VALIDATION_ERROR");
+        verifyNoInteractions(issueComplimentaryTicketsUseCase);
+    }
+
+    @Test
     void shouldRejectEventsNotOnSale() {
         given(issueComplimentaryTicketsUseCase.execute(any()))
                 .willReturn(Mono.error(new EventNotOnSaleException("e-1", EventStatusEnum.PUBLISHING)));

@@ -403,6 +403,50 @@ class OrderRestControllerImplTest {
                 .expectStatus().isNotFound();
     }
 
+    static Stream<String> malformedIds() {
+        return Stream.of("a".repeat(65), "bad_id", "o 1");
+    }
+
+    @ParameterizedTest
+    @MethodSource("malformedIds")
+    void shouldRejectMalformedOrderIdsBeforeCallingTheUseCases(String orderId) {
+        webTestClient.mutateWith(customer(CUSTOMER)).get().uri("/api/v1/orders/{orderId}", orderId)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("VALIDATION_ERROR")
+                .jsonPath("$.detail").isEqualTo(
+                        "The path parameter 'orderId' must contain 1 to 64 letters, digits or dashes");
+        webTestClient.mutateWith(customer(CUSTOMER)).post().uri("/api/v1/orders/{orderId}/confirmation", orderId)
+                .header(OrderRestController.IDEMPOTENCY_KEY_HEADER, KEY)
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"paymentToken\":\"tok_visa-1\"}")
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("VALIDATION_ERROR");
+        webTestClient.mutateWith(customer(CUSTOMER)).delete().uri("/api/v1/orders/{orderId}/reservation", orderId)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("VALIDATION_ERROR");
+        verifyNoInteractions(getOrderStatusUseCase, confirmOrderUseCase, cancelOrderUseCase);
+    }
+
+    @ParameterizedTest
+    @MethodSource("malformedIds")
+    void shouldRejectMalformedEventIdsWhenPlacingOrders(String eventId) {
+        webTestClient.mutateWith(customer(CUSTOMER)).post().uri("/api/v1/events/{eventId}/orders", eventId)
+                .header(OrderRestController.IDEMPOTENCY_KEY_HEADER, KEY)
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"quantity\":2}")
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("VALIDATION_ERROR")
+                .jsonPath("$.detail").isEqualTo(
+                        "The path parameter 'eventId' must contain 1 to 64 letters, digits or dashes");
+        verifyNoInteractions(placeOrderUseCase);
+    }
+
     @Test
     void shouldRequireAuthenticationToCancel() {
         webTestClient.delete().uri(ORDER + "/reservation")

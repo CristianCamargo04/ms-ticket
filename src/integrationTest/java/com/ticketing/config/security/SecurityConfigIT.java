@@ -6,6 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.nimbusds.jwt.SignedJWT;
 import com.ticketing.business.usecase.CancelOrderUseCase;
 import com.ticketing.business.usecase.ConfirmOrderUseCase;
 import com.ticketing.business.usecase.GetOrderStatusUseCase;
@@ -16,6 +17,7 @@ import com.ticketing.enums.OrderTypeEnum;
 import com.ticketing.presentation.OrderRestController;
 import com.ticketing.presentation.impl.OrderRestControllerImpl;
 import java.time.Duration;
+import java.text.ParseException;
 import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -42,6 +44,8 @@ import reactor.core.publisher.Mono;
 /**
  * End-to-end JWT validation against a real OAuth2 issuer (mock-oauth2-server, the same flow as Cognito): signature
  * checked with the issuer's JWKS, issuer, audience and expiry validated, roles mapped by {@link JwtRoleConverter}.
+ * mock-oauth2-server signs every issuer id with its own key ({@code kid} = issuer id), so the issuer check is
+ * exercised with a token of the trusted key whose {@code iss} claim is overridden.
  */
 @Testcontainers
 @WebFluxTest(controllers = OrderRestControllerImpl.class)
@@ -51,6 +55,7 @@ class SecurityConfigIT {
     private static final int PORT = 8080;
     private static final String AUDIENCE = "ms-ticket";
     private static final String IDEMPOTENCY_KEY = "it-6f1c2a9e-0b7d-4c55";
+    private static final String FOREIGN_ISSUER = "https://evil.example/default";
 
     /** Token claims per requested scope (mock-oauth2-server request mappings). */
     private static final String ISSUER_CONFIG = """
@@ -61,7 +66,10 @@ class SecurityConfigIT {
                 {"requestParam": "scope", "match": "no-role",
                  "claims": {"sub": "user-it", "aud": ["ms-ticket"]}},
                 {"requestParam": "scope", "match": "wrong-audience",
-                 "claims": {"sub": "customer-it", "aud": ["another-api"], "roles": ["customer"]}}]}]}
+                 "claims": {"sub": "customer-it", "aud": ["another-api"], "roles": ["customer"]}},
+                {"requestParam": "scope", "match": "foreign-issuer",
+                 "claims": {"sub": "customer-it", "aud": ["ms-ticket"], "roles": ["customer"],
+                            "iss": "https://evil.example/default"}}]}]}
             """;
 
     @Container
@@ -167,10 +175,33 @@ class SecurityConfigIT {
     }
 
     @Test
-    void shouldRejectTokensOfAnotherIssuer() {
-        placeOrder(token("other", "customer"))
+    void shouldRejectTokensSignedByTheTrustedKeyButIssuedByAnotherIssuer() throws ParseException {
+        String accessToken = token("default", "foreign-issuer");
+        SignedJWT jwt = SignedJWT.parse(accessToken);
+        // Same signing key as the accepted tokens: only the issuer validator can reject it.
+        assertThat(jwt.getHeader().getKeyID()).isEqualTo(SignedJWT.parse(token("default", "customer"))
+                .getHeader().getKeyID());
+        assertThat(jwt.getJWTClaimsSet().getIssuer()).isEqualTo(FOREIGN_ISSUER);
+        assertThat(jwt.getJWTClaimsSet().getAudience()).containsExactly(AUDIENCE);
+
+        placeOrder(accessToken)
                 .expectStatus().isUnauthorized()
-                .expectHeader().valueEquals(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\"");
+                .expectHeader().valueEquals(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\"")
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("UNAUTHORIZED");
+        verifyNoInteractions(placeOrderUseCase);
+    }
+
+    @Test
+    void shouldRejectTokensSignedByAnUnknownKey() throws ParseException {
+        String accessToken = token("other", "customer");
+        assertThat(SignedJWT.parse(accessToken).getHeader().getKeyID()).isEqualTo("other");
+
+        for (int i = 0; i < 5; i++) {
+            placeOrder(accessToken)
+                    .expectStatus().isUnauthorized()
+                    .expectHeader().valueEquals(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\"");
+        }
         verifyNoInteractions(placeOrderUseCase);
     }
 

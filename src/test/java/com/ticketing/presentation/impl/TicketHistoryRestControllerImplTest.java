@@ -13,6 +13,8 @@ import com.ticketing.enums.TicketStatusEnum;
 import com.ticketing.enums.TransitionReasonEnum;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webflux.test.autoconfigure.WebFluxTest;
 import org.springframework.context.annotation.Import;
@@ -68,6 +70,20 @@ class TicketHistoryRestControllerImplTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody().json("[]");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"bad_event, T-000001, eventId", "e-1, T_000001, ticketId"})
+    void shouldRejectMalformedIdentifiers(String eventId, String ticketId, String parameter) {
+        webTestClient.mutateWith(admin(ADMIN)).get()
+                .uri("/api/v1/events/{eventId}/tickets/{ticketId}/transitions", eventId, ticketId)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("VALIDATION_ERROR")
+                .jsonPath("$.detail").isEqualTo(
+                        "The path parameter '" + parameter + "' must contain 1 to 64 letters, digits or dashes");
+        verifyNoInteractions(getTicketHistoryUseCase);
     }
 
     @Test

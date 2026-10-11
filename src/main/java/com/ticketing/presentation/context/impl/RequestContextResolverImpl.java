@@ -41,8 +41,10 @@ public class RequestContextResolverImpl implements RequestContextResolver {
     }
 
     /**
-     * Resolves the client IP: the first hop of {@code X-Forwarded-For} (set by the load balancer), else the remote
-     * address of the connection.
+     * Resolves the client IP: the first hop of {@code X-Forwarded-For}, else the remote address of the connection
+     * (the rule of the {@code RequestContextResolver} contract). A load balancer appends to that header, so its first
+     * hop is whatever the client sent: the value is informational (logs, fallback rate-limit key of unauthenticated
+     * callers, who never reach the rate-limited routes) and must not be used for any trust decision.
      *
      * @param request the request
      * @return the client IP, {@code null} when unknown

@@ -7,6 +7,7 @@ import com.ticketing.presentation.dto.IssueComplimentaryRequestDto;
 import com.ticketing.presentation.dto.OrderAcceptedResponseDto;
 import com.ticketing.presentation.impl.idempotency.IdempotencyKeyResolver;
 import com.ticketing.presentation.impl.idempotency.RequestFingerprintCalculator;
+import com.ticketing.presentation.impl.support.ResourceIdValidator;
 import com.ticketing.presentation.mapper.OrderDtoMapper;
 import java.util.Objects;
 import org.springframework.http.ResponseEntity;
@@ -53,7 +54,10 @@ public class ComplimentaryRestControllerImpl implements ComplimentaryRestControl
     public Mono<ResponseEntity<OrderAcceptedResponseDto>> issueComplimentary(String eventId, String idempotencyKey,
                                                                              IssueComplimentaryRequestDto request,
                                                                              ServerHttpRequest httpRequest) {
-        return Mono.fromCallable(() -> idempotencyKeyResolver.resolve(idempotencyKey))
+        return Mono.fromCallable(() -> {
+                    ResourceIdValidator.requireValid(ResourceIdValidator.EVENT_ID, eventId);
+                    return idempotencyKeyResolver.resolve(idempotencyKey);
+                })
                 .flatMap(key -> requestContextResolver.resolve(httpRequest)
                         .flatMap(context -> issueComplimentaryTicketsUseCase.execute(
                                 mapper.toIssueComplimentaryRequest(eventId, request, context, key,
