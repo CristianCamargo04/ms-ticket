@@ -1,0 +1,344 @@
+# -----------------------------------------------------------------------------
+# ms-ticket - local stack (Compose specification; no "version:" key).
+#
+#   cp .env.example .env                                   # dummy emulator settings
+#   docker compose up -d --build --wait                    # full stack
+#   docker compose up -d --wait dynamodb-local localstack payment-mock auth-mock
+#                                                          # infra only (app from the IDE)
+#   docker compose up -d --wait --scale ticketing-worker=2 # more consumers
+#   docker compose --profile tools up -d dynamodb-admin    # table browser on :8001
+#   docker compose down -v                                 # stop and wipe everything
+#
+# Hardening applied to every container that tolerates it: non-root user, read-only
+# root filesystem with a small tmpfs /tmp, all Linux capabilities dropped,
+# no-new-privileges, CPU/memory/PID limits, bounded json-file logs, and published
+# ports bound to 127.0.0.1 only (nothing is reachable from the LAN).
+# See docker/README.md for ports, tokens and payment test cards.
+# -----------------------------------------------------------------------------
+name: ms-ticket
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Dummy credentials for DynamoDB Local / LocalStack, read from .env (LOCAL_ prefix
+# so a developer's real exported AWS_* variables can never leak into containers).
+x-emulator-credentials: &emulator-credentials
+  AWS_REGION: ${LOCAL_AWS_REGION:-us-east-1}
+  AWS_ACCESS_KEY_ID: ${LOCAL_AWS_ACCESS_KEY_ID:?LOCAL_AWS_ACCESS_KEY_ID is not set - run "cp .env.example .env"}
+  AWS_SECRET_ACCESS_KEY: ${LOCAL_AWS_SECRET_ACCESS_KEY:?LOCAL_AWS_SECRET_ACCESS_KEY is not set - run "cp .env.example .env"}
+
+# Environment shared by ticketing-api and ticketing-worker. Keys follow Spring Boot
+# relaxed binding of the properties in docs/design/implementation-spec.md section 8
+# (e.g. aws.dynamodb-endpoint -> AWS_DYNAMODBENDPOINT) and override application-local.yml.
+x-app-environment: &app-environment
+  <<: *emulator-credentials
+  SPRING_PROFILES_ACTIVE: local
+  # AWS endpoints = container hostnames on the compose network. The AWS_ENDPOINT_URL_*
+  # variables are the SDK-native equivalents honoured by AWS SDK for Java v2 itself.
+  AWS_DYNAMODBENDPOINT: http://dynamodb-local:8000
+  AWS_SQSENDPOINT: http://localstack:4566
+  AWS_ENDPOINT_URL_DYNAMODB: http://dynamodb-local:8000
+  AWS_ENDPOINT_URL_SQS: http://localstack:4566
+  # Same values as the application defaults aws.sqs.order-reservation-queue and
+  # aws.sqs.order-payment-queue; init-sqs.sh creates them plus "<queue>-dlq" for each.
+  AWS_SQS_ORDERRESERVATIONQUEUE: ${SQS_ORDER_RESERVATION_QUEUE:-ticketing-order-reservation}
+  AWS_SQS_ORDERPAYMENTQUEUE: ${SQS_ORDER_PAYMENT_QUEUE:-ticketing-order-payment}
+  # JWT validation - the "issuer problem":
+  #   Clients (scripts/infra/get-token.sh, Postman, k6) request tokens from the HOST at
+  #   http://localhost:8090/default, and mock-oauth2-server derives "iss" from the URL it
+  #   was called with, so every token carries iss=http://localhost:8090/default. Inside
+  #   the compose network "localhost" is the app container itself, so:
+  #     - the "iss" claim is validated against the host-side URL ......... TICKETING_SECURITY_ISSUER
+  #     - the signing keys are downloaded through the service name ......... ..._JWT_JWKSETURI
+  #   This is why the app uses jwk-set-uri plus an explicit issuer validator instead of
+  #   issuer-uri discovery, which would require the issuer URL to resolve in-container.
+  TICKETING_SECURITY_ISSUER: http://localhost:${AUTH_MOCK_HOST_PORT:-8090}/default
+  TICKETING_SECURITY_AUDIENCE: ms-ticket
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWKSETURI: http://auth-mock:8080/default/jwks
+  TICKETING_PAYMENT_BASEURL: http://payment-mock:8080
+
+# Same image for both runtime modes (ADR-008): only the environment differs.
+# ticketing-api builds it; ticketing-worker reuses it (built once, never pulled).
+x-app: &app
+  image: ms-ticket:local
+  init: true
+  read_only: true
+  tmpfs:
+    # The only writable path; it replaces the image's VOLUME /tmp with a size-capped
+    # tmpfs. "exec" is deliberate (Docker tmpfs defaults to noexec): Netty extracts its
+    # native epoll transport here before loading it, like the ECS task does on the image's
+    # /tmp volume. With noexec it silently degrades to the NIO transport.
+    - /tmp:rw,exec,nosuid,nodev,size=64m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  restart: on-failure:3
+  # Longer than the 30 s in-flight SQS drain performed on SIGTERM (graceful shutdown).
+  stop_grace_period: 45s
+  logging: *logging
+  networks:
+    - ticketing
+  # Probes GET /actuator/health/readiness on 8080: locally the actuator shares the HTTP
+  # port (management.server.port is only set in AWS), so the probe needs no override.
+  healthcheck:
+    test: ["CMD", "/usr/local/bin/healthcheck"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 90s
+    start_interval: 3s
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 768M
+        pids: 1024
+      reservations:
+        memory: 512M
+
+services:
+  # ---------------------------------------------------------------------------
+  # Infrastructure emulators
+  # ---------------------------------------------------------------------------
+  dynamodb-local:
+    image: amazon/dynamodb-local:3.3.1
+    # -sharedDb: one database for every credential/region, so the app, the AWS CLI and
+    # dynamodb-admin all see the same tables. -inMemory: state is wiped on restart.
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory", "-disableTelemetry"]
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60
+    read_only: true
+    tmpfs:
+      # "exec" is required here (Docker tmpfs defaults to noexec): DynamoDB Local
+      # extracts its native SQLite library into /tmp and loads it from there.
+      - /tmp:rw,exec,nosuid,nodev,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "127.0.0.1:${DYNAMODB_HOST_PORT:-8000}:8000"
+    healthcheck:
+      # A real (unsigned) ListTables call: proves the storage engine answers, not just the socket.
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null -X POST http://localhost:8000
+          -H 'Content-Type: application/x-amz-json-1.0'
+          -H 'X-Amz-Target: DynamoDB_20120810.ListTables'
+          -H 'Authorization: AWS4-HMAC-SHA256 Credential=healthcheck/20260101/us-east-1/dynamodb/aws4_request, SignedHeaders=host, Signature=0'
+          -d '{}'
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging: *logging
+    networks:
+      - ticketing
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  localstack:
+    # Pinned: localstack:latest requires a paid auth token.
+    image: localstack/localstack:4.9
+    environment:
+      <<: *emulator-credentials
+      AWS_DEFAULT_REGION: ${LOCAL_AWS_REGION:-us-east-1}
+      SERVICES: sqs
+      EAGER_SERVICE_LOADING: "1"
+      DISABLE_EVENTS: "1"
+      SQS_ORDER_RESERVATION_QUEUE: ${SQS_ORDER_RESERVATION_QUEUE:-ticketing-order-reservation}
+      SQS_ORDER_PAYMENT_QUEUE: ${SQS_ORDER_PAYMENT_QUEUE:-ticketing-order-payment}
+    volumes:
+      # READY hook: queues + DLQs + redrive policies (idempotent).
+      - ./src/main/resources/scripts/localstack/init-sqs.sh:/etc/localstack/init/ready.d/10-init-sqs.sh:ro
+      - ./docker/localstack/healthcheck.sh:/opt/ticketing/healthcheck.sh:ro
+      # Deliberately NO /var/run/docker.sock mount: SQS needs no container features and
+      # the socket would hand this container root-equivalent access to the host.
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:${LOCALSTACK_HOST_PORT:-4566}:4566"
+    healthcheck:
+      # Healthy only once the init hook succeeded and all four queues exist.
+      test: ["CMD", "bash", "/opt/ticketing/healthcheck.sh"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    logging: *logging
+    networks:
+      - ticketing
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  payment-mock:
+    image: wiremock/wiremock:3.13.2
+    # Unprivileged "nobody" user; mappings are mounted read-only.
+    user: "65534:65534"
+    command:
+      - --port=8080
+      - --disable-banner
+      # Delayed responses (tok_slow) must not pin Jetty threads under load tests.
+      - --async-response-enabled=true
+      # Bounded request journal: k6 runs would otherwise grow it without limit.
+      - --max-request-journal-entries=1000
+    volumes:
+      - ./docker/wiremock:/home/wiremock:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "127.0.0.1:${PAYMENT_MOCK_HOST_PORT:-8089}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/__admin/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging: *logging
+    networks:
+      - ticketing
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  auth-mock:
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.5
+    environment:
+      SERVER_PORT: "8080"
+      JSON_CONFIG_PATH: /config/config.json
+      LOG_LEVEL: INFO
+    volumes:
+      - ./docker/auth-mock/config.json:/config/config.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      # Host port 8090 -> container 8080. Tokens MUST be requested through this
+      # host URL so that iss = http://localhost:8090/default (see x-app-environment).
+      - "127.0.0.1:${AUTH_MOCK_HOST_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/default/.well-known/openid-configuration"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging: *logging
+    networks:
+      - ticketing
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # Application (same image, two runtime modes)
+  # ---------------------------------------------------------------------------
+  ticketing-api:
+    <<: *app
+    # Always built from the local sources (BuildKit makes unchanged rebuilds instant);
+    # never pulled from a registry.
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REVISION: ${GIT_COMMIT:-local}
+    environment:
+      <<: *app-environment
+      # TICKETING_RUNTIMEMODE is the relaxed-binding name of ticketing.runtime-mode (spec
+      # section 8); TICKETING_RUNTIME_MODE serves ${TICKETING_RUNTIME_MODE} placeholders.
+      TICKETING_RUNTIMEMODE: API
+      TICKETING_RUNTIME_MODE: API
+      # The API owns the local schema: it applies the DynamoDB migrations on startup.
+      TICKETING_MIGRATIONS_ENABLED: "true"
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      auth-mock:
+        condition: service_healthy
+
+  ticketing-worker:
+    <<: *app
+    # Image built by ticketing-api (local tag, nothing to pull).
+    pull_policy: never
+    environment:
+      <<: *app-environment
+      TICKETING_RUNTIMEMODE: WORKER
+      TICKETING_RUNTIME_MODE: WORKER
+      TICKETING_MIGRATIONS_ENABLED: "false"
+    # No published ports: the worker only consumes SQS and runs the sweepers, which also
+    # lets it scale with --scale ticketing-worker=N. Its actuator stays reachable on the
+    # compose network (http://ticketing-worker:8080/actuator/health).
+    depends_on:
+      # Started after the API is ready, i.e. after the local migrations created the tables.
+      ticketing-api:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      payment-mock:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Optional tools: docker compose --profile tools up -d dynamodb-admin
+  # ---------------------------------------------------------------------------
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin:5.3.4
+    profiles:
+      - tools
+    environment:
+      <<: *emulator-credentials
+      DYNAMO_ENDPOINT: http://dynamodb-local:8000
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "127.0.0.1:${DYNAMODB_ADMIN_HOST_PORT:-8001}:8001"
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+    logging: *logging
+    networks:
+      - ticketing
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  ticketing:
+    name: ms-ticket-network
+    driver: bridge

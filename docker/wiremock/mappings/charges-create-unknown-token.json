@@ -1,0 +1,27 @@
+{
+  "name": "POST /v1/charges - any other paymentToken is declined as INVALID_PAYMENT_TOKEN",
+  "priority": 5,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/charges",
+    "headers": {
+      "Idempotency-Key": { "matches": "^[A-Za-z0-9_-]{8,128}$" }
+    },
+    "bodyPatterns": [
+      { "matchesJsonPath": "$.paymentToken" }
+    ]
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "Idempotency-Key": "{{request.headers.Idempotency-Key}}",
+      "X-Order-Id": "{{jsonPath request.body '$.orderId'}}"
+    },
+    "bodyFileName": "charge-declined.json",
+    "transformers": ["response-template"],
+    "transformerParameters": {
+      "declineReason": "INVALID_PAYMENT_TOKEN"
+    }
+  }
+}

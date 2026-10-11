@@ -1,0 +1,39 @@
+{
+  "interactiveLogin": false,
+  "httpServer": "NettyWrapper",
+  "tokenCallbacks": [
+    {
+      "issuerId": "default",
+      "tokenExpiry": 3600,
+      "requestMappings": [
+        {
+          "requestParam": "client_id",
+          "match": "customer-1",
+          "claims": {
+            "sub": "customer-1",
+            "roles": ["CUSTOMER"],
+            "aud": ["ms-ticket"]
+          }
+        },
+        {
+          "requestParam": "client_id",
+          "match": "customer-2",
+          "claims": {
+            "sub": "customer-2",
+            "roles": ["CUSTOMER"],
+            "aud": ["ms-ticket"]
+          }
+        },
+        {
+          "requestParam": "client_id",
+          "match": "admin",
+          "claims": {
+            "sub": "admin",
+            "roles": ["ADMIN"],
+            "aud": ["ms-ticket"]
+          }
+        }
+      ]
+    }
+  ]
+}

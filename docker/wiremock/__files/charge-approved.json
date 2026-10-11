@@ -1,0 +1,5 @@
+{
+  "paymentId": "pay_{{randomValue length=24 type='ALPHANUMERIC'}}",
+  "status": "APPROVED",
+  "declineReason": null
+}
