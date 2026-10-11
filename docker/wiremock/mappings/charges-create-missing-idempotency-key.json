@@ -1,0 +1,23 @@
+{
+  "name": "POST /v1/charges - 400 when the Idempotency-Key header is missing",
+  "priority": 2,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/charges",
+    "headers": {
+      "Idempotency-Key": { "absent": true }
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "bodyFileName": "gateway-error.json",
+    "transformers": ["response-template"],
+    "transformerParameters": {
+      "error": "MISSING_IDEMPOTENCY_KEY",
+      "message": "The Idempotency-Key header is required"
+    }
+  }
+}

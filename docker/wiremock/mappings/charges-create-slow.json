@@ -1,0 +1,25 @@
+{
+  "name": "POST /v1/charges - approved after 5 s (paymentToken tok_slow*), exercises client timeouts",
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/charges",
+    "headers": {
+      "Idempotency-Key": { "matches": "^[A-Za-z0-9_-]{8,128}$" }
+    },
+    "bodyPatterns": [
+      { "matchesJsonPath": { "expression": "$.paymentToken", "matches": "^tok_slow.*$" } }
+    ]
+  },
+  "response": {
+    "status": 201,
+    "fixedDelayMilliseconds": 5000,
+    "headers": {
+      "Content-Type": "application/json",
+      "Idempotency-Key": "{{request.headers.Idempotency-Key}}",
+      "X-Order-Id": "{{jsonPath request.body '$.orderId'}}"
+    },
+    "bodyFileName": "charge-approved.json",
+    "transformers": ["response-template"]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "POST /v1/charges - 400 for any other request (malformed Idempotency-Key, missing paymentToken)",
+  "priority": 10,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/charges"
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "bodyFileName": "gateway-error.json",
+    "transformers": ["response-template"],
+    "transformerParameters": {
+      "error": "INVALID_REQUEST",
+      "message": "Malformed Idempotency-Key header or charge request body"
+    }
+  }
+}

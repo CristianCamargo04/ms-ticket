@@ -1,0 +1,29 @@
+# -----------------------------------------------------------------------------
+# Allowlist build context: start by excluding everything, then re-include only
+# what the image build needs. Keeps the context tiny and makes it impossible to
+# leak local secrets or artefacts into an image layer:
+#   .git/, .gradle/, build/, infra/, docs/, postman/, load-test/, IDE folders,
+#   .env, src/test/, src/integrationTest/, ... are never sent to the daemon.
+# -----------------------------------------------------------------------------
+*
+
+# Gradle wrapper and build scripts
+!gradlew
+!gradle/
+!settings.gradle.kts
+!build.gradle.kts
+!gradle.properties
+
+# Production sources and resources only
+!src/main/
+
+# Container healthcheck probe copied into the runtime stage
+!docker/app/healthcheck.sh
+
+# Re-exclude local artefacts that could appear under an allowed path
+**/build/
+**/.gradle/
+**/*.iml
+**/.DS_Store
+**/.env
+**/.env.*
