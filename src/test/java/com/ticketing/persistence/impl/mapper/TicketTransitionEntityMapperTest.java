@@ -1,4 +1,4 @@
-package com.ticketing.persistence.mapper;
+package com.ticketing.persistence.impl.mapper;
 
 import static com.ticketing.persistence.PersistenceFixtures.EVENT_ID;
 import static com.ticketing.persistence.PersistenceFixtures.NOW;
@@ -20,7 +20,7 @@ class TicketTransitionEntityMapperTest {
             "transition-1", TicketStatusEnum.AVAILABLE, TicketStatusEnum.RESERVED, ORDER_ID,
             TransitionReasonEnum.RESERVATION, "order-worker", NOW);
 
-    private final TicketTransitionEntityMapper mapper = TicketTransitionEntityMapper.INSTANCE;
+    private final TicketTransitionEntityMapper mapper = new TicketTransitionEntityMapper();
 
     @Test
     void shouldKeyTheHistoryByTicketAndChronologicalSortKey() {

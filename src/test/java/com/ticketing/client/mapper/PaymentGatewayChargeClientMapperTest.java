@@ -13,7 +13,7 @@ import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 
 class PaymentGatewayChargeClientMapperTest {
-    private final PaymentGatewayChargeClientMapper mapper = PaymentGatewayChargeClientMapper.INSTANCE;
+    private final PaymentGatewayChargeClientMapper mapper = new PaymentGatewayChargeClientMapper();
 
     @Test
     void shouldMapChargeRequestWithoutTheIdempotencyKeyAndMaskTheTokenInToString() {
@@ -51,7 +51,7 @@ class PaymentGatewayChargeClientMapperTest {
 
     @Test
     void shouldRejectNullArguments() {
-        assertThat(mapper.toChargeRequest(null)).isNull();
+        assertThatNullPointerException().isThrownBy(() -> mapper.toChargeRequest(null));
         assertThatNullPointerException().isThrownBy(() -> mapper.toOutcome(null));
     }
 }

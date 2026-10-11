@@ -8,7 +8,7 @@ import com.ticketing.domain.exception.InventoryConflictException;
 import com.ticketing.enums.TicketStatusEnum;
 import com.ticketing.persistence.TicketPersistence;
 import com.ticketing.persistence.entity.TicketEntity;
-import com.ticketing.persistence.mapper.TicketEntityMapper;
+import com.ticketing.persistence.impl.mapper.TicketEntityMapper;
 import com.ticketing.persistence.impl.support.BatchRetryPolicy;
 import com.ticketing.persistence.impl.support.DynamoDbTableNames;
 import com.ticketing.persistence.impl.support.QueryPaginator;

@@ -67,7 +67,7 @@ class PaymentGatewayChargeClientImplTest {
 
     private PaymentGatewayChargeClientImpl newClient(String baseUrl, PaymentGatewaySettings settings) {
         return new PaymentGatewayChargeClientImpl(WebClient.builder().baseUrl(baseUrl).build(), settings,
-                circuitBreaker, PaymentGatewayChargeClientMapper.INSTANCE);
+                circuitBreaker, new PaymentGatewayChargeClientMapper());
     }
 
     private static MockResponse json(int code, String body) {
@@ -457,7 +457,7 @@ class PaymentGatewayChargeClientImplTest {
     @Test
     void shouldRejectNullArguments() {
         WebClient webClient = WebClient.create();
-        PaymentGatewayChargeClientMapper mapper = PaymentGatewayChargeClientMapper.INSTANCE;
+        PaymentGatewayChargeClientMapper mapper = new PaymentGatewayChargeClientMapper();
 
         assertThatNullPointerException().isThrownBy(() -> client.charge(null));
         assertThatNullPointerException().isThrownBy(() -> client.findCharge(null));

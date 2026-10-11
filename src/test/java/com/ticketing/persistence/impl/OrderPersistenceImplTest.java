@@ -18,7 +18,7 @@ import com.ticketing.domain.data.OrderData;
 import com.ticketing.enums.DeadlineTypeEnum;
 import com.ticketing.enums.OrderProcessingStatusEnum;
 import com.ticketing.enums.OrderTypeEnum;
-import com.ticketing.persistence.mapper.OrderEntityMapper;
+import com.ticketing.persistence.impl.mapper.OrderEntityMapper;
 import com.ticketing.persistence.impl.support.DeadlinePartitioner;
 import java.time.Instant;
 import java.util.List;
@@ -54,7 +54,7 @@ class OrderPersistenceImplTest {
     private DynamoDbAsyncClient dynamoDb;
 
     private final DeadlinePartitioner partitioner = new DeadlinePartitioner(TABLES);
-    private final OrderEntityMapper mapper = OrderEntityMapper.INSTANCE;
+    private final OrderEntityMapper mapper = new OrderEntityMapper(partitioner);
     private OrderPersistenceImpl persistence;
 
     @BeforeEach
@@ -74,7 +74,7 @@ class OrderPersistenceImplTest {
         verify(dynamoDb).putItem(request.capture());
         assertThat(request.getValue().tableName()).isEqualTo(TABLE);
         assertThat(request.getValue().conditionExpression()).isEqualTo("attribute_not_exists(orderId)");
-        assertThat(request.getValue().item()).isEqualTo(mapper.toItem(order, partitioner));
+        assertThat(request.getValue().item()).isEqualTo(mapper.toItem(order));
         assertThat(request.getValue().item()).containsKeys("deadlinePartition", "deadlineAt");
     }
 
@@ -100,7 +100,7 @@ class OrderPersistenceImplTest {
     void shouldReadAnOrderWithAStronglyConsistentRead() {
         OrderData order = queuedOrder(OrderTypeEnum.COMPLIMENTARY, 3);
         when(dynamoDb.getItem(any(GetItemRequest.class)))
-                .thenReturn(completed(GetItemResponse.builder().item(mapper.toItem(order, partitioner)).build()));
+                .thenReturn(completed(GetItemResponse.builder().item(mapper.toItem(order)).build()));
 
         StepVerifier.create(persistence.findById(ORDER_ID)).expectNext(order).verifyComplete();
 
@@ -124,9 +124,9 @@ class OrderPersistenceImplTest {
                 .mapToObj(index -> order("order-" + index, NOW.minusSeconds(10 - index)))
                 .toList();
         when(dynamoDb.query(any(QueryRequest.class)))
-                .thenReturn(completed(QueryResponse.builder().items(List.of(mapper.toItem(due.get(2), partitioner))).build()))
-                .thenReturn(completed(QueryResponse.builder().items(List.of(mapper.toItem(due.get(0), partitioner),
-                        mapper.toItem(due.get(1), partitioner))).build()))
+                .thenReturn(completed(QueryResponse.builder().items(List.of(mapper.toItem(due.get(2)))).build()))
+                .thenReturn(completed(QueryResponse.builder().items(List.of(mapper.toItem(due.get(0)),
+                        mapper.toItem(due.get(1)))).build()))
                 .thenReturn(completed(QueryResponse.builder().items(List.of()).build()));
 
         StepVerifier.create(persistence.findDueOrders(DeadlineTypeEnum.DISPATCH, NOW, 50))
@@ -151,7 +151,7 @@ class OrderPersistenceImplTest {
     @Test
     void shouldReturnAtMostLimitDueOrders() {
         when(dynamoDb.query(any(QueryRequest.class))).thenReturn(completed(QueryResponse.builder()
-                .items(List.of(mapper.toItem(order("a", NOW.minusSeconds(3)), partitioner), mapper.toItem(order("b", NOW.minusSeconds(2)), partitioner)))
+                .items(List.of(mapper.toItem(order("a", NOW.minusSeconds(3))), mapper.toItem(order("b", NOW.minusSeconds(2)))))
                 .build()));
 
         StepVerifier.create(persistence.findDueOrders(DeadlineTypeEnum.DISPATCH, NOW, 2))

@@ -55,7 +55,7 @@ class SqsOrderQueueClientImplTest {
 
     private SqsOrderQueueClientImpl newClient() {
         return new SqsOrderQueueClientImpl(sqsAsyncClient, new SqsQueueNames(RESERVATION_QUEUE, PAYMENT_QUEUE),
-                SqsOrderQueueClientMapper.INSTANCE, jsonMapper);
+                new SqsOrderQueueClientMapper(), jsonMapper);
     }
 
     private static CompletableFuture<GetQueueUrlResponse> queueUrl(String url) {
@@ -214,7 +214,7 @@ class SqsOrderQueueClientImplTest {
         when(failingJsonMapper.writeValueAsString(any())).thenThrow(new IllegalStateException("not serializable"));
         when(sqsAsyncClient.getQueueUrl(queueUrlRequest(RESERVATION_QUEUE))).thenReturn(queueUrl(RESERVATION_URL));
         SqsOrderQueueClientImpl client = new SqsOrderQueueClientImpl(sqsAsyncClient,
-                new SqsQueueNames(RESERVATION_QUEUE, PAYMENT_QUEUE), SqsOrderQueueClientMapper.INSTANCE,
+                new SqsQueueNames(RESERVATION_QUEUE, PAYMENT_QUEUE), new SqsOrderQueueClientMapper(),
                 failingJsonMapper);
 
         StepVerifier.create(client.publishReservationRequested(RESERVATION))
@@ -352,7 +352,7 @@ class SqsOrderQueueClientImplTest {
     void shouldRejectNullArguments() {
         SqsOrderQueueClientImpl client = newClient();
         SqsQueueNames names = new SqsQueueNames(RESERVATION_QUEUE, PAYMENT_QUEUE);
-        SqsOrderQueueClientMapper mapper = SqsOrderQueueClientMapper.INSTANCE;
+        SqsOrderQueueClientMapper mapper = new SqsOrderQueueClientMapper();
 
         assertThatNullPointerException().isThrownBy(() -> client.publishReservationRequested(null));
         assertThatNullPointerException().isThrownBy(() -> client.publishPaymentRequested(null));

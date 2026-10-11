@@ -1,4 +1,4 @@
-package com.ticketing.persistence.mapper;
+package com.ticketing.persistence.impl.mapper;
 
 import static com.ticketing.persistence.PersistenceFixtures.NOW;
 import static com.ticketing.persistence.PersistenceFixtures.ORDER_ID;
@@ -22,13 +22,13 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 class OrderEntityMapperTest {
     private final DeadlinePartitioner partitioner = new DeadlinePartitioner(TABLES);
-    private final OrderEntityMapper mapper = OrderEntityMapper.INSTANCE;
+    private final OrderEntityMapper mapper = new OrderEntityMapper(partitioner);
 
     @Test
     void shouldWriteTheDispatchDeadlineOfAQueuedOrder() {
         OrderData order = queuedOrder(OrderTypeEnum.STANDARD, 2);
 
-        Map<String, AttributeValue> item = mapper.toItem(order, partitioner);
+        Map<String, AttributeValue> item = mapper.toItem(order);
 
         assertThat(item.get("orderId").s()).isEqualTo(ORDER_ID);
         assertThat(item.get("orderType").s()).isEqualTo("STANDARD");
@@ -48,21 +48,21 @@ class OrderEntityMapperTest {
         OrderData reserved = reservedOrder(List.of("T-000001", "T-000002"));
         OrderData pending = pendingOrder(List.of("T-000001"));
 
-        assertThat(mapper.toEntity(reserved, partitioner).getDeadlinePartition())
+        assertThat(mapper.toEntity(reserved).getDeadlinePartition())
                 .isEqualTo(partitioner.partitionOf(DeadlineTypeEnum.HOLD_EXPIRATION, ORDER_ID));
-        assertThat(mapper.toItem(reserved, partitioner).get("ticketIds").l()).extracting(AttributeValue::s)
+        assertThat(mapper.toItem(reserved).get("ticketIds").l()).extracting(AttributeValue::s)
                 .containsExactly("T-000001", "T-000002");
-        assertThat(mapper.toEntity(pending, partitioner).getDeadlinePartition())
+        assertThat(mapper.toEntity(pending).getDeadlinePartition())
                 .isEqualTo(partitioner.partitionOf(DeadlineTypeEnum.PAYMENT_CONFIRMATION, ORDER_ID));
-        assertThat(mapper.fromItem(mapper.toItem(reserved, partitioner))).isEqualTo(reserved);
-        assertThat(mapper.fromItem(mapper.toItem(pending, partitioner))).isEqualTo(pending);
+        assertThat(mapper.fromItem(mapper.toItem(reserved))).isEqualTo(reserved);
+        assertThat(mapper.fromItem(mapper.toItem(pending))).isEqualTo(pending);
     }
 
     @Test
     void shouldOmitTheDeadlineOfATerminalOrder() {
         OrderData sold = pendingOrder(List.of("T-000001")).withSale("pay-1", NOW);
 
-        Map<String, AttributeValue> item = mapper.toItem(sold, partitioner);
+        Map<String, AttributeValue> item = mapper.toItem(sold);
 
         assertThat(item).doesNotContainKeys("deadlinePartition", "deadlineAt");
         assertThat(item.get("paymentReference").s()).isEqualTo("pay-1");
@@ -73,7 +73,7 @@ class OrderEntityMapperTest {
     void shouldOmitAnIncompleteDeadline() {
         OrderData queuedWithoutDeadline = queuedOrder(OrderTypeEnum.COMPLIMENTARY, 1).withDeadline(null, NOW);
 
-        assertThat(mapper.toItem(queuedWithoutDeadline, partitioner)).doesNotContainKeys("deadlinePartition", "deadlineAt");
+        assertThat(mapper.toItem(queuedWithoutDeadline)).doesNotContainKeys("deadlinePartition", "deadlineAt");
     }
 
     @Test
@@ -81,13 +81,13 @@ class OrderEntityMapperTest {
         OrderData rejected = queuedOrder(OrderTypeEnum.STANDARD, 1)
                 .withProcessingStatus(OrderProcessingStatusEnum.REJECTED, "SOLD_OUT", NOW);
 
-        assertThat(mapper.toItem(rejected, partitioner).get("reason").s()).isEqualTo("SOLD_OUT");
-        assertThat(mapper.fromItem(mapper.toItem(rejected, partitioner))).isEqualTo(rejected);
+        assertThat(mapper.toItem(rejected).get("reason").s()).isEqualTo("SOLD_OUT");
+        assertThat(mapper.fromItem(mapper.toItem(rejected))).isEqualTo(rejected);
     }
 
     @Test
     void shouldReadAMissingTicketListAsEmpty() {
-        OrderEntity entity = mapper.toEntity(queuedOrder(OrderTypeEnum.STANDARD, 1), partitioner);
+        OrderEntity entity = mapper.toEntity(queuedOrder(OrderTypeEnum.STANDARD, 1));
         entity.setTicketIds(null);
 
         assertThat(mapper.toDomain(entity).ticketIds()).isEmpty();
@@ -95,7 +95,7 @@ class OrderEntityMapperTest {
 
     @Test
     void shouldFailClearlyOnACorruptedItem() {
-        OrderEntity entity = mapper.toEntity(queuedOrder(OrderTypeEnum.STANDARD, 1), partitioner);
+        OrderEntity entity = mapper.toEntity(queuedOrder(OrderTypeEnum.STANDARD, 1));
         entity.setQuantity(null);
 
         assertThatThrownBy(() -> mapper.toDomain(entity)).isInstanceOf(IllegalStateException.class)

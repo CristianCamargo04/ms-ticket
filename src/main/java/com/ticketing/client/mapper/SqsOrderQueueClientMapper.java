@@ -9,39 +9,37 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import org.mapstruct.Mapper;
-import org.mapstruct.Mapping;
-import org.mapstruct.Named;
-import org.mapstruct.NullValueCheckStrategy;
-import org.mapstruct.NullValuePropertyMappingStrategy;
-import org.mapstruct.factory.Mappers;
+import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 
-@Mapper(
-        componentModel = "spring",
-        nullValueCheckStrategy = NullValueCheckStrategy.ALWAYS,
-        nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
-public interface SqsOrderQueueClientMapper {
+@Component
+public class SqsOrderQueueClientMapper {
+    public static final String MESSAGE_TYPE_ATTRIBUTE = "messageType";
 
-    SqsOrderQueueClientMapper INSTANCE = Mappers.getMapper(SqsOrderQueueClientMapper.class);
+    public static final String CORRELATION_ID_ATTRIBUTE = "correlationId";
 
-    String MESSAGE_TYPE_ATTRIBUTE = "messageType";
-    String CORRELATION_ID_ATTRIBUTE = "correlationId";
-    String SCHEMA_VERSION_ATTRIBUTE = "schemaVersion";
-    String SCHEMA_VERSION = "1";
-    String STRING_TYPE = "String";
-    String NUMBER_TYPE = "Number";
-    Pattern CORRELATION_ID_PATTERN = Pattern.compile("^[A-Za-z0-9-]{1,64}$");
+    public static final String SCHEMA_VERSION_ATTRIBUTE = "schemaVersion";
 
-    @Mapping(target = "correlationId",
-            expression = "java(SqsOrderQueueClientMapper.correlationIdOrNew(message.correlationId()))")
-    OrderReservationMessageDto toDto(OrderReservationMessage message);
+    public static final String SCHEMA_VERSION = "1";
 
-    @Mapping(target = "correlationId",
-            expression = "java(SqsOrderQueueClientMapper.correlationIdOrNew(message.correlationId()))")
-    PaymentRequestedMessageDto toDto(PaymentRequestedMessage message);
+    public static final Pattern CORRELATION_ID_PATTERN = Pattern.compile("^[A-Za-z0-9-]{1,64}$");
 
-    default Map<String, MessageAttributeValue> toMessageAttributes(MessageTypeEnum messageType, String correlationId) {
+    private static final String STRING_TYPE = "String";
+    private static final String NUMBER_TYPE = "Number";
+
+    public OrderReservationMessageDto toDto(OrderReservationMessage message) {
+        Objects.requireNonNull(message, "message");
+        return new OrderReservationMessageDto(message.orderId(), message.eventId(),
+                correlationIdOrNew(message.correlationId()), message.occurredAt());
+    }
+
+    public PaymentRequestedMessageDto toDto(PaymentRequestedMessage message) {
+        Objects.requireNonNull(message, "message");
+        return new PaymentRequestedMessageDto(message.orderId(), message.paymentToken(),
+                correlationIdOrNew(message.correlationId()), message.occurredAt());
+    }
+
+    public Map<String, MessageAttributeValue> toMessageAttributes(MessageTypeEnum messageType, String correlationId) {
         Objects.requireNonNull(messageType, "messageType");
         Objects.requireNonNull(correlationId, "correlationId");
         return Map.of(
@@ -50,7 +48,6 @@ public interface SqsOrderQueueClientMapper {
                 SCHEMA_VERSION_ATTRIBUTE, attribute(NUMBER_TYPE, SCHEMA_VERSION));
     }
 
-    @Named("correlationIdOrNew")
     static String correlationIdOrNew(String correlationId) {
         if (correlationId != null && CORRELATION_ID_PATTERN.matcher(correlationId).matches()) {
             return correlationId;

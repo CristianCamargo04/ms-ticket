@@ -11,7 +11,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class TicketTransitionDtoMapperTest {
-    private final TicketTransitionDtoMapper mapper = TicketTransitionDtoMapper.INSTANCE;
+    private final TicketTransitionDtoMapper mapper = new TicketTransitionDtoMapper();
 
     @Test
     void shouldMapATransitionWithoutInternalIdentifiers() {
@@ -27,6 +27,6 @@ class TicketTransitionDtoMapperTest {
 
     @Test
     void shouldRejectNull() {
-        assertThat(mapper.toResponse(null)).isNull();
+        assertThatNullPointerException().isThrownBy(() -> mapper.toResponse(null));
     }
 }

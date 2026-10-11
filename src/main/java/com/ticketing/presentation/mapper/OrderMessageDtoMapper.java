@@ -4,20 +4,18 @@ import com.ticketing.domain.internal_request.ProcessOrderPaymentRequest;
 import com.ticketing.domain.internal_request.ReserveTicketsRequest;
 import com.ticketing.presentation.dto.message.OrderReservationMessageRequestDto;
 import com.ticketing.presentation.dto.message.PaymentRequestedMessageRequestDto;
-import org.mapstruct.Mapper;
-import org.mapstruct.NullValueCheckStrategy;
-import org.mapstruct.NullValuePropertyMappingStrategy;
-import org.mapstruct.factory.Mappers;
+import java.util.Objects;
+import org.springframework.stereotype.Component;
 
-@Mapper(
-        componentModel = "spring",
-        nullValueCheckStrategy = NullValueCheckStrategy.ALWAYS,
-        nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
-public interface OrderMessageDtoMapper {
+@Component
+public class OrderMessageDtoMapper {
+    public ReserveTicketsRequest toReserveTicketsRequest(OrderReservationMessageRequestDto message) {
+        Objects.requireNonNull(message, "message");
+        return new ReserveTicketsRequest(message.orderId(), message.correlationId());
+    }
 
-    OrderMessageDtoMapper INSTANCE = Mappers.getMapper(OrderMessageDtoMapper.class);
-
-    ReserveTicketsRequest toReserveTicketsRequest(OrderReservationMessageRequestDto message);
-
-    ProcessOrderPaymentRequest toProcessOrderPaymentRequest(PaymentRequestedMessageRequestDto message);
+    public ProcessOrderPaymentRequest toProcessOrderPaymentRequest(PaymentRequestedMessageRequestDto message) {
+        Objects.requireNonNull(message, "message");
+        return new ProcessOrderPaymentRequest(message.orderId(), message.paymentToken(), message.correlationId());
+    }
 }

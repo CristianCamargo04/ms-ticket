@@ -13,10 +13,10 @@ import com.ticketing.persistence.impl.InventoryTransactionPersistenceImpl;
 import com.ticketing.persistence.impl.OrderPersistenceImpl;
 import com.ticketing.persistence.impl.TicketPersistenceImpl;
 import com.ticketing.persistence.impl.TicketTransitionPersistenceImpl;
-import com.ticketing.persistence.mapper.EventEntityMapper;
-import com.ticketing.persistence.mapper.OrderEntityMapper;
-import com.ticketing.persistence.mapper.TicketEntityMapper;
-import com.ticketing.persistence.mapper.TicketTransitionEntityMapper;
+import com.ticketing.persistence.impl.mapper.EventEntityMapper;
+import com.ticketing.persistence.impl.mapper.OrderEntityMapper;
+import com.ticketing.persistence.impl.mapper.TicketEntityMapper;
+import com.ticketing.persistence.impl.mapper.TicketTransitionEntityMapper;
 import com.ticketing.persistence.impl.support.DeadlinePartitioner;
 import com.ticketing.persistence.impl.support.DynamoDbTableNames;
 import java.math.BigDecimal;
@@ -45,12 +45,12 @@ public record PersistenceTestContext(DynamoDbAsyncClient client, DynamoDbTableNa
         DynamoDbTableNames names = new DynamoDbTableNames(tables.events(), tables.tickets(), tables.orders(),
                 tables.ticketTransitions(), tables.distributedLocks(), DEADLINE_SHARDS);
         DeadlinePartitioner partitioner = new DeadlinePartitioner(names);
-        TicketTransitionEntityMapper transitionMapper = TicketTransitionEntityMapper.INSTANCE;
+        TicketTransitionEntityMapper transitionMapper = new TicketTransitionEntityMapper();
         return new PersistenceTestContext(client, names,
-                new EventPersistenceImpl(client, enhanced, names, EventEntityMapper.INSTANCE),
-                new TicketPersistenceImpl(client, names, TicketEntityMapper.INSTANCE,
+                new EventPersistenceImpl(client, enhanced, names, new EventEntityMapper()),
+                new TicketPersistenceImpl(client, names, new TicketEntityMapper(),
                         new EventPolicy(20_000, Duration.ofSeconds(1), 4)),
-                new OrderPersistenceImpl(client, enhanced, names, OrderEntityMapper.INSTANCE, partitioner),
+                new OrderPersistenceImpl(client, enhanced, names, new OrderEntityMapper(partitioner), partitioner),
                 new InventoryTransactionPersistenceImpl(client, names, partitioner, transitionMapper),
                 new TicketTransitionPersistenceImpl(client, names, transitionMapper),
                 new DistributedLockPersistenceImpl(client, names));

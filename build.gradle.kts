@@ -27,9 +27,6 @@ dependencies {
     annotationProcessor(platform(libs.spring.boot.bom))
     compileOnly(libs.lombok)
     annotationProcessor(libs.lombok)
-    implementation(libs.mapstruct)
-    annotationProcessor(libs.mapstruct.processor)
-    annotationProcessor(libs.lombok.mapstruct.binding)
     testCompileOnly(libs.lombok)
     testAnnotationProcessor(libs.lombok)
 
@@ -116,11 +113,6 @@ tasks.withType<JavaCompile>().configureEach {
     options.compilerArgs.addAll(listOf("-parameters", "-Xlint:all,-processing,-serial", "-Werror"))
 }
 
-tasks.compileJava {
-    options.compilerArgs.addAll(listOf("-Amapstruct.unmappedTargetPolicy=ERROR",
-        "-Amapstruct.suppressGeneratorTimestamp=true"))
-}
-
 tasks.withType<Test>().configureEach {
     jvmArgs("-javaagent:${mockitoAgent.asPath}", "-XX:+EnableDynamicAgentLoading", "-Xshare:off")
     testLogging {
@@ -135,7 +127,6 @@ jacoco {
 
 val coverageExclusions = listOf(
     "com/ticketing/TicketingApplication*",
-    "com/ticketing/**/mapper/*MapperImpl*",
 )
 
 tasks.jacocoTestReport {

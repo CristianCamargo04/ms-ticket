@@ -61,7 +61,7 @@ class OrderPaymentSqsControllerImplTest {
     void setUp() {
         controller = new OrderPaymentSqsControllerImpl(
                 new JsonMessageReader(JsonMapper.builder().build(), validatorFactory.getValidator()),
-                OrderMessageDtoMapper.INSTANCE, processOrderPaymentUseCase);
+                new OrderMessageDtoMapper(), processOrderPaymentUseCase);
     }
 
     private static OrderData soldOrder() {

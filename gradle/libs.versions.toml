@@ -11,8 +11,6 @@ jacoco = "0.8.15"
 testcontainers = "2.0.5"
 mockwebserver = "5.5.0"
 lombok = "1.18.48"
-mapstruct = "1.6.3"
-lombok-mapstruct-binding = "0.2.0"
 
 [libraries]
 spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
@@ -40,9 +38,6 @@ resilience4j-reactor = { module = "io.github.resilience4j:resilience4j-reactor",
 resilience4j-circuitbreaker = { module = "io.github.resilience4j:resilience4j-circuitbreaker", version.ref = "resilience4j" }
 resilience4j-micrometer = { module = "io.github.resilience4j:resilience4j-micrometer", version.ref = "resilience4j" }
 lombok = { module = "org.projectlombok:lombok", version.ref = "lombok" }
-mapstruct = { module = "org.mapstruct:mapstruct", version.ref = "mapstruct" }
-mapstruct-processor = { module = "org.mapstruct:mapstruct-processor", version.ref = "mapstruct" }
-lombok-mapstruct-binding = { module = "org.projectlombok:lombok-mapstruct-binding", version.ref = "lombok-mapstruct-binding" }
 bucket4j-core = { module = "com.bucket4j:bucket4j_jdk17-core", version.ref = "bucket4j" }
 
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }

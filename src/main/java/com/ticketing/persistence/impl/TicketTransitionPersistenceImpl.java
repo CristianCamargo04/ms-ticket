@@ -4,7 +4,7 @@ import static com.ticketing.persistence.impl.support.DynamoAttributes.string;
 
 import com.ticketing.domain.data.TicketTransitionData;
 import com.ticketing.persistence.TicketTransitionPersistence;
-import com.ticketing.persistence.mapper.TicketTransitionEntityMapper;
+import com.ticketing.persistence.impl.mapper.TicketTransitionEntityMapper;
 import com.ticketing.persistence.impl.support.DynamoDbTableNames;
 import com.ticketing.persistence.impl.support.QueryPaginator;
 import java.util.Map;

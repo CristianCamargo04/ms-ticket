@@ -80,7 +80,7 @@ class SqsOrderQueueClientImplIT {
 
     private SqsOrderQueueClientImpl newClient(String reservationQueue, String paymentQueue) {
         return new SqsOrderQueueClientImpl(sqs, new SqsQueueNames(reservationQueue, paymentQueue),
-                SqsOrderQueueClientMapper.INSTANCE, jsonMapper);
+                new SqsOrderQueueClientMapper(), jsonMapper);
     }
 
     private static Message receiveOne(String queueUrl) {
@@ -207,7 +207,7 @@ class SqsOrderQueueClientImplIT {
              SqsAsyncClient silentSqs = sqsClient("http://127.0.0.1:" + silentEndpoint.getLocalPort())) {
             SqsOrderQueueClientImpl client = new SqsOrderQueueClientImpl(silentSqs,
                     new SqsQueueNames("unreachable-reservation", "unreachable-payment"),
-                    SqsOrderQueueClientMapper.INSTANCE, jsonMapper);
+                    new SqsOrderQueueClientMapper(), jsonMapper);
             long startNanos = System.nanoTime();
 
             StepVerifier.create(client.publishReservationRequested(

@@ -65,7 +65,7 @@ class AvailabilityRestControllerImplTest {
 
     private AvailabilityRestControllerImpl controller() {
         return new AvailabilityRestControllerImpl(getEventAvailabilityUseCase, streamEventAvailabilityUseCase,
-                AvailabilityDtoMapper.INSTANCE);
+                new AvailabilityDtoMapper());
     }
 
     private static Integer availableOf(ServerSentEvent<AvailabilityResponseDto> event) {

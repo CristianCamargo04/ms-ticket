@@ -13,14 +13,14 @@ import org.junit.jupiter.api.Test;
 class OrderMessageDtoMapperTest {
     private static final Instant OCCURRED_AT = Instant.parse("2026-10-10T10:00:00Z");
 
-    private final OrderMessageDtoMapper mapper = OrderMessageDtoMapper.INSTANCE;
+    private final OrderMessageDtoMapper mapper = new OrderMessageDtoMapper();
 
     @Test
     void shouldMapReservationMessages() {
         assertThat(mapper.toReserveTicketsRequest(
                 new OrderReservationMessageRequestDto("o-1", "e-1", "corr-1", OCCURRED_AT)))
                 .isEqualTo(new ReserveTicketsRequest("o-1", "corr-1"));
-        assertThat(mapper.toReserveTicketsRequest(null)).isNull();
+        assertThatNullPointerException().isThrownBy(() -> mapper.toReserveTicketsRequest(null));
     }
 
     @Test
@@ -28,6 +28,6 @@ class OrderMessageDtoMapperTest {
         assertThat(mapper.toProcessOrderPaymentRequest(
                 new PaymentRequestedMessageRequestDto("o-1", "tok_1", "corr-1", OCCURRED_AT)))
                 .isEqualTo(new ProcessOrderPaymentRequest("o-1", "tok_1", "corr-1"));
-        assertThat(mapper.toProcessOrderPaymentRequest(null)).isNull();
+        assertThatNullPointerException().isThrownBy(() -> mapper.toProcessOrderPaymentRequest(null));
     }
 }
