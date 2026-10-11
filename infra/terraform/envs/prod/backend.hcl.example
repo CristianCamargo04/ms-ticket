@@ -1,0 +1,9 @@
+# Copy to backend.hcl (git-ignored) and run: terraform init -backend-config=backend.hcl
+# The bucket must exist beforehand (bootstrap once per account) with versioning
+# enabled, Block Public Access on and, ideally, a bucket policy that denies
+# non-TLS access and limits writes to the CI deployment role.
+bucket = "ms-ticket-tfstate-222222222222-us-east-1"
+region = "us-east-1"
+
+# Optional: encrypt the state with a customer-managed key instead of SSE-S3.
+# kms_key_id = "arn:aws:kms:us-east-1:222222222222:alias/terraform-state"
