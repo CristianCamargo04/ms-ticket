@@ -94,10 +94,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # usr/bin/pebble is Canonical's service manager shipped by the Ubuntu-based eclipse-temurin JRE image (built
-      # with a Go stdlib that has fixable HIGH CVEs upstream). The container never runs it (ENTRYPOINT is java), so
-      # it is excluded here; the proper fix is deleting it in the runtime stage of the Dockerfile, after which this
-      # exclusion must go. Every other package (OS and Java libraries) is gated.
+      # Every package (OS and Java libraries) is gated; the Dockerfile removes the unused usr/bin/pebble binary of
+      # the Ubuntu-based JRE image, whose Go stdlib had fixable HIGH CVEs.
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -105,7 +103,6 @@ jobs:
           scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          skip-files: usr/bin/pebble
           exit-code: "1"
           format: table
 

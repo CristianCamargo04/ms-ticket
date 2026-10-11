@@ -32,8 +32,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
@@ -77,6 +79,7 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
     private final DynamoDbTableNames tables;
     private final DeadlinePartitioner partitioner;
     private final TicketTransitionEntityMapper transitionMapper;
+    private final Supplier<String> nonceSupplier;
 
     /**
      * Creates the adapter.
@@ -86,13 +89,31 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
      * @param partitioner      deadline index partitioner
      * @param transitionMapper audit record mapper
      */
+    @Autowired
     public InventoryTransactionPersistenceImpl(DynamoDbAsyncClient dynamoDb, DynamoDbTableNames tables,
                                                DeadlinePartitioner partitioner,
                                                TicketTransitionEntityMapper transitionMapper) {
+        this(dynamoDb, tables, partitioner, transitionMapper, () -> UUID.randomUUID().toString());
+    }
+
+    /**
+     * Creates the adapter with a custom nonce source (deterministic tests).
+     *
+     * @param dynamoDb         low-level client
+     * @param tables           physical table names
+     * @param partitioner      deadline index partitioner
+     * @param transitionMapper audit record mapper
+     * @param nonceSupplier    one value per built request, part of the {@code ClientRequestToken}
+     */
+    InventoryTransactionPersistenceImpl(DynamoDbAsyncClient dynamoDb, DynamoDbTableNames tables,
+                                        DeadlinePartitioner partitioner,
+                                        TicketTransitionEntityMapper transitionMapper,
+                                        Supplier<String> nonceSupplier) {
         this.dynamoDb = dynamoDb;
         this.tables = tables;
         this.partitioner = partitioner;
         this.transitionMapper = transitionMapper;
+        this.nonceSupplier = nonceSupplier;
     }
 
     @Override
@@ -215,24 +236,27 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
 
     /**
      * Idempotency token of a transaction: the first {@value #CLIENT_REQUEST_TOKEN_LENGTH} hex characters of
-     * {@code sha256(operation | orderId | sortedTicketIds | now)}.
+     * {@code sha256(operation | orderId | sortedTicketIds | now | nonce)}.
      *
-     * <p>It is stable for one command (SDK retries of a timed-out call are deduplicated by DynamoDB) and independent
-     * of the ticket order. The command instant is part of it on purpose: a business-level retry is a new command
-     * with a new {@code now} (and new hold/deadline values), and reusing the token of a previous attempt with
-     * different parameters within DynamoDB's 10-minute idempotency window would fail with
-     * {@code IdempotentParameterMismatchException} instead of evaluating the conditions again.
+     * <p>The request is built once per subscription, so the SDK's own retries of a timed-out call reuse the token and
+     * DynamoDB deduplicates them. The per-request {@code nonce} makes two <em>concurrent callers</em> distinct even
+     * when they send the same command in the same millisecond: without it DynamoDB would treat the second identical
+     * request as an idempotent replay and report success to both callers (duplicate side effects such as a second
+     * payment message), or fail with {@code IdempotentParameterMismatchException} when the parameters differ.
+     * With a fresh nonce the loser is evaluated against the conditions and gets {@code OrderStateChanged}.
      *
      * @param operation operation name (release operations include their reason)
      * @param orderId   order identifier
      * @param ticketIds affected tickets, any order
      * @param now       command instant
+     * @param nonce     unique value of the built request
      * @return the token
      */
-    static String clientRequestToken(String operation, String orderId, List<String> ticketIds, Instant now) {
+    static String clientRequestToken(String operation, String orderId, List<String> ticketIds, Instant now,
+                                     String nonce) {
         String sortedTicketIds = ticketIds.stream().sorted().collect(Collectors.joining(","));
         return HashUtil.sha256Hex(String.join("|", operation, orderId, sortedTicketIds,
-                Long.toString(now.toEpochMilli()))).substring(0, CLIENT_REQUEST_TOKEN_LENGTH);
+                Long.toString(now.toEpochMilli()), nonce)).substring(0, CLIENT_REQUEST_TOKEN_LENGTH);
     }
 
     private Mono<InventoryWriteOutcome> execute(String operation, InventoryCommand command, ItemChange eventChange,
@@ -249,7 +273,8 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
     private TransactWriteItemsRequest request(String operation, InventoryCommand command, ItemChange eventChange,
                                               ItemChange ticketChange, ItemChange orderChange) {
         OrderData order = command.order();
-        String token = clientRequestToken(operation, order.orderId(), command.ticketIds(), command.now());
+        String token = clientRequestToken(operation, order.orderId(), command.ticketIds(), command.now(),
+                nonceSupplier.get());
         List<TransactWriteItem> items = new ArrayList<>(2 * command.quantity() + 2);
         items.add(update(tables.events(), Map.of("eventId", string(order.eventId())), eventChange,
                 Map.of(":q", number(command.quantity())), command.now()));

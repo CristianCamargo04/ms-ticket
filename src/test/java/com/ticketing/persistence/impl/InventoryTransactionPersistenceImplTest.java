@@ -76,12 +76,13 @@ class InventoryTransactionPersistenceImplTest {
     private DynamoDbAsyncClient dynamoDb;
 
     private final DeadlinePartitioner partitioner = new DeadlinePartitioner(TABLES);
+    private static final String NONCE = "nonce";
     private InventoryTransactionPersistenceImpl persistence;
 
     @BeforeEach
     void setUp() {
         persistence = new InventoryTransactionPersistenceImpl(dynamoDb, TABLES, partitioner,
-                new TicketTransitionEntityMapper());
+                new TicketTransitionEntityMapper(), () -> NONCE);
     }
 
     @Test
@@ -96,7 +97,7 @@ class InventoryTransactionPersistenceImplTest {
 
         TransactWriteItemsRequest request = capturedRequest();
         assertThat(request.clientRequestToken()).isEqualTo(InventoryTransactionPersistenceImpl
-                .clientRequestToken("reserve", ORDER_ID, TICKETS, NOW)).hasSize(36);
+                .clientRequestToken("reserve", ORDER_ID, TICKETS, NOW, NONCE)).hasSize(36);
         assertThat(request.transactItems()).hasSize(2 * TICKETS.size() + 2);
         assertEventUpdate(request, "SET availableCount = availableCount - :q, reservedCount = reservedCount + :q, "
                         + "updatedAt = :now ADD version :one", "#status = :onSale AND availableCount >= :q",
@@ -251,7 +252,7 @@ class InventoryTransactionPersistenceImplTest {
 
         TransactWriteItemsRequest request = capturedRequest();
         assertThat(request.clientRequestToken()).isEqualTo(InventoryTransactionPersistenceImpl
-                .clientRequestToken("release-" + reason.name(), ORDER_ID, TICKETS, NOW));
+                .clientRequestToken("release-" + reason.name(), ORDER_ID, TICKETS, NOW, NONCE));
         assertEventUpdate(request, "SET availableCount = availableCount + :q, " + heldCounter + " = "
                         + heldCounter + " - :q, updatedAt = :now ADD version :one", "attribute_exists(eventId)",
                 Map.of(":q", AttributeValue.fromN("2"), ":now", NOW_MILLIS, ":one", ONE), null);
@@ -351,20 +352,47 @@ class InventoryTransactionPersistenceImplTest {
     }
 
     @Test
+    void shouldMakeConcurrentIdenticalCommandsDistinctThroughTheNonce() {
+        assertThat(InventoryTransactionPersistenceImpl.clientRequestToken("reserve", ORDER_ID, TICKETS, NOW, "a"))
+                .isNotEqualTo(InventoryTransactionPersistenceImpl.clientRequestToken("reserve", ORDER_ID, TICKETS,
+                        NOW, "b"));
+    }
+
+    @Test
+    void shouldUseARandomNonceWithThePublicConstructor() {
+        committed();
+        InventoryTransactionPersistenceImpl randomNonce = new InventoryTransactionPersistenceImpl(dynamoDb, TABLES,
+                partitioner, new TicketTransitionEntityMapper());
+        OrderData order = queuedOrder(OrderTypeEnum.STANDARD, 2);
+        ReserveInventoryCommand command = new ReserveInventoryCommand(order, TICKETS, HOLD_EXPIRES_AT, NOW, "worker");
+
+        StepVerifier.create(randomNonce.reserve(command).then(randomNonce.reserve(command)))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        org.mockito.ArgumentCaptor<TransactWriteItemsRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(TransactWriteItemsRequest.class);
+        org.mockito.Mockito.verify(dynamoDb, org.mockito.Mockito.times(2)).transactWriteItems(captor.capture());
+        assertThat(captor.getAllValues().get(0).clientRequestToken())
+                .isNotEqualTo(captor.getAllValues().get(1).clientRequestToken());
+    }
+
+    @Test
     void shouldKeepTheClientRequestTokenStableForOneCommand() {
-        String token = InventoryTransactionPersistenceImpl.clientRequestToken("reserve", ORDER_ID, TICKETS, NOW);
+        String token = InventoryTransactionPersistenceImpl.clientRequestToken("reserve", ORDER_ID, TICKETS, NOW,
+                NONCE);
 
         assertThat(InventoryTransactionPersistenceImpl.clientRequestToken("reserve", ORDER_ID,
-                List.of("T-000003", "T-000007"), NOW)).as("independent of the ticket order").isEqualTo(token);
+                List.of("T-000003", "T-000007"), NOW, NONCE)).as("independent of the ticket order").isEqualTo(token);
         assertThat(token).hasSize(36).matches("[0-9a-f]+");
-        assertThat(InventoryTransactionPersistenceImpl.clientRequestToken("confirm", ORDER_ID, TICKETS, NOW))
+        assertThat(InventoryTransactionPersistenceImpl.clientRequestToken("confirm", ORDER_ID, TICKETS, NOW, NONCE))
                 .isNotEqualTo(token);
-        assertThat(InventoryTransactionPersistenceImpl.clientRequestToken("reserve", "other", TICKETS, NOW))
+        assertThat(InventoryTransactionPersistenceImpl.clientRequestToken("reserve", "other", TICKETS, NOW, NONCE))
                 .isNotEqualTo(token);
         assertThat(InventoryTransactionPersistenceImpl.clientRequestToken("reserve", ORDER_ID, List.of("T-000007"),
-                NOW)).isNotEqualTo(token);
+                NOW, NONCE)).isNotEqualTo(token);
         assertThat(InventoryTransactionPersistenceImpl.clientRequestToken("reserve", ORDER_ID, TICKETS,
-                NOW.plusMillis(1))).as("a new attempt is a new command").isNotEqualTo(token);
+                NOW.plusMillis(1), NONCE)).as("a new attempt is a new command").isNotEqualTo(token);
     }
 
     @Test

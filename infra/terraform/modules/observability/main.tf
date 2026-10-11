@@ -48,7 +48,7 @@ resource "aws_cloudwatch_log_metric_filter" "payment_captured_for_released_order
 
   name           = "${var.name_prefix}-payment-captured-for-released-order"
   log_group_name = aws_cloudwatch_log_group.service["worker"].name
-  pattern        = "\"payment captured for released order\""
+  pattern        = "\"Payment captured for released order\""
 
   metric_transformation {
     name          = "PaymentCapturedForReleasedOrder"

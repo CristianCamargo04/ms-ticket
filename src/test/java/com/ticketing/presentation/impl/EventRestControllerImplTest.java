@@ -217,7 +217,7 @@ class EventRestControllerImplTest {
                 .expectStatus().isEqualTo(413)
                 .expectBody()
                 .jsonPath("$.status").isEqualTo(413)
-                .jsonPath("$.errorCode").doesNotExist();
+                .jsonPath("$.errorCode").isEqualTo("PAYLOAD_TOO_LARGE");
     }
 
     @Test
@@ -229,7 +229,7 @@ class EventRestControllerImplTest {
                 .expectHeader().contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .expectBody()
                 .jsonPath("$.status").isEqualTo(415)
-                .jsonPath("$.title").isEqualTo("Unsupported Media Type");
+                .jsonPath("$.errorCode").isEqualTo("UNSUPPORTED_MEDIA_TYPE");
     }
 
     @Test
@@ -387,8 +387,8 @@ class EventRestControllerImplTest {
                 .expectHeader().contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .expectBody()
                 .jsonPath("$.status").isEqualTo(404)
-                .jsonPath("$.title").isEqualTo("Not Found")
-                .jsonPath("$.errorCode").doesNotExist();
+                .jsonPath("$.errorCode").isEqualTo("RESOURCE_NOT_FOUND")
+                .jsonPath("$.detail").isEqualTo("No resource matches the requested path.");
     }
 
     @Test

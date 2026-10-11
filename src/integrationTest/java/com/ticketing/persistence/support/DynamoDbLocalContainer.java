@@ -40,7 +40,7 @@ public final class DynamoDbLocalContainer {
      */
     public static synchronized DynamoDbAsyncClient client() {
         if (client == null) {
-            container = new GenericContainer<>(DockerImageName.parse("amazon/dynamodb-local:latest"))
+            container = new GenericContainer<>(DockerImageName.parse("amazon/dynamodb-local:3.3.1"))
                     .withExposedPorts(PORT)
                     .withCommand("-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb")
                     .waitingFor(Wait.forListeningPort());

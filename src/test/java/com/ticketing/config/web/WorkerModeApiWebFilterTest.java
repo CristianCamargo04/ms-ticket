@@ -51,7 +51,7 @@ class WorkerModeApiWebFilterTest {
         assertThat(exchange.getResponse().getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
         StepVerifier.create(exchange.getResponse().getBodyAsString())
                 .assertNext(body -> assertThat(body)
-                        .contains("\"status\":404", "\"title\":\"Not Found\"", "\"correlationId\":\"corr-42\"",
+                        .contains("\"status\":404", "\"title\":\"RESOURCE_NOT_FOUND\"", "\"errorCode\":\"RESOURCE_NOT_FOUND\"", "\"correlationId\":\"corr-42\"",
                                 WorkerModeApiWebFilter.DETAIL)
                         .doesNotContain("worker"))
                 .verifyComplete();

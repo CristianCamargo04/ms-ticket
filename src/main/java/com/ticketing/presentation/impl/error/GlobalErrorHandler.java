@@ -51,6 +51,12 @@ public class GlobalErrorHandler {
     static final String FORBIDDEN_DETAIL = "Access to this resource is denied";
     static final String BEARER_CHALLENGE = "Bearer";
 
+    /** Status of an unknown route; its framework detail ("No static resource ...") is not exposed. */
+    private static final int NOT_FOUND = 404;
+
+    /** Client-facing detail of an unknown route. */
+    static final String NOT_FOUND_DETAIL = "No resource matches the requested path.";
+
     private static final Logger log = LoggerFactory.getLogger(GlobalErrorHandler.class);
 
     private final ProblemDetailFactory problems;
@@ -171,7 +177,7 @@ public class GlobalErrorHandler {
         } else {
             log.debug("Request rejected with {} on {}: {}", status.value(), describe(exchange),
                     exception.getMessage());
-            detail = exception.getBody().getDetail();
+            detail = status.value() == NOT_FOUND ? NOT_FOUND_DETAIL : exception.getBody().getDetail();
         }
         return respond(problems.forStatus(status, detail, exchange), exception.getHeaders());
     }

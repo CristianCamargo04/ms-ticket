@@ -74,7 +74,8 @@ RUN groupadd --system --gid "${APP_GID}" app \
 # so UID 10001 can use it, and declared as a VOLUME so that with a read-only root
 # filesystem (ECS readonlyRootFilesystem, compose read_only) /tmp is still a writable,
 # exec-capable mount. Compose replaces it with a size-capped tmpfs at the same path.
-RUN mkdir -p /tmp && chmod 1777 /tmp
+# pebble (Ubuntu service manager, unused: ENTRYPOINT is java) ships a Go stdlib with fixable HIGH CVEs.
+RUN rm -f /usr/bin/pebble && mkdir -p /tmp && chmod 1777 /tmp
 VOLUME ["/tmp"]
 
 WORKDIR /app

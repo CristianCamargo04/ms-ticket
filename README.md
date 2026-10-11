@@ -701,8 +701,8 @@ Resumen (detalle y *trade-offs* en [docs/limitations-and-improvements.md](docs/l
 6. Pago simulado → autorización/captura, reembolsos automáticos, PCI-DSS con tokenización en el
    frontend.
 7. Reportes contables → Streams → S3/Athena.
-8. Desalineaciones IaC ↔ app detectadas (audiencia de Cognito, API key de la pasarela, salto de
-   `X-Forwarded-For`, `traceparent`, mayúsculas del filtro de una alarma).
+8. Trazas distribuidas: propagar `traceparent` por atributos SQS y exportar con OTLP/ADOT (hoy se
+   propaga el `correlationId`).
 
 ## 17. Mapa requisito → dónde se cumple
 

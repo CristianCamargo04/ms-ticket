@@ -229,7 +229,7 @@ class GlobalErrorHandlerTest {
         ResponseEntity<ProblemDetail> response = handler.handleBodyTooLarge(
                 new DataBufferLimitException("Exceeded limit on max bytes to buffer : 262144"), exchange);
 
-        assertProblem(response, 413, null);
+        assertProblem(response, 413, "PAYLOAD_TOO_LARGE");
         assertThat(response.getBody().getDetail()).isEqualTo(GlobalErrorHandler.BODY_TOO_LARGE_DETAIL);
     }
 
@@ -240,9 +240,9 @@ class GlobalErrorHandlerTest {
         ResponseEntity<ProblemDetail> notAllowed = handler.handleErrorResponse(
                 new MethodNotAllowedException(HttpMethod.PUT, Set.of(HttpMethod.GET)), exchange);
 
-        assertProblem(notFound, 404, null);
-        assertThat(notFound.getBody().getTitle()).isEqualTo("Not Found");
-        assertProblem(notAllowed, 405, null);
+        assertProblem(notFound, 404, "RESOURCE_NOT_FOUND");
+        assertThat(notFound.getBody().getDetail()).isEqualTo(GlobalErrorHandler.NOT_FOUND_DETAIL);
+        assertProblem(notAllowed, 405, "METHOD_NOT_ALLOWED");
         assertThat(notAllowed.getHeaders().getFirst(HttpHeaders.ALLOW)).isEqualTo("GET");
         assertThat(notAllowed.getBody().getDetail()).contains("GET");
     }

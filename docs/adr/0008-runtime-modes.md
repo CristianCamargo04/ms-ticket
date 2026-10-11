@@ -41,9 +41,9 @@ los tableros.
 - Los sweepers corren solo donde hay workers (mínimo 1 tarea worker en AWS).
 
 **Negativas**
-- `RuntimeModeEnum.apiEnabled()` existe pero hoy no desactiva los controladores REST en modo
-  `worker`: las rutas existen aunque no son alcanzables (compose no publica puertos y en AWS el
-  security group del worker no tiene ingress). Mejora: condicionar los `@RestController` al modo.
+- En modo `worker` los `@RestController` siguen registrados; `WorkerModeApiWebFilter` responde `404`
+  a todo `/api/**` (además, compose no publica puertos y en AWS el worker no tiene ingress). Mejora:
+  no registrar los controladores en ese modo.
 - Ambas imágenes cargan todas las dependencias (tamaño mayor que dos binarios especializados).
 
 ## Alternativas consideradas

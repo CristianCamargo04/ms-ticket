@@ -114,13 +114,18 @@ public class ProblemDetailFactory {
      * Business error code equivalent to a protocol status, if any.
      *
      * @param status the HTTP status
-     * @return the error code of the 400, 401, 403, 429 and 500 statuses, empty otherwise
+     * @return the error code of the 400, 401, 403, 404, 405, 406, 413, 415, 429 and 500 statuses, empty otherwise
      */
     static Optional<ErrorCodeEnum> errorCodeOf(HttpStatusCode status) {
         return switch (status.value()) {
             case 400 -> Optional.of(ErrorCodeEnum.VALIDATION_ERROR);
             case 401 -> Optional.of(ErrorCodeEnum.UNAUTHORIZED);
             case 403 -> Optional.of(ErrorCodeEnum.FORBIDDEN);
+            case 404 -> Optional.of(ErrorCodeEnum.RESOURCE_NOT_FOUND);
+            case 405 -> Optional.of(ErrorCodeEnum.METHOD_NOT_ALLOWED);
+            case 406 -> Optional.of(ErrorCodeEnum.NOT_ACCEPTABLE);
+            case 413 -> Optional.of(ErrorCodeEnum.PAYLOAD_TOO_LARGE);
+            case 415 -> Optional.of(ErrorCodeEnum.UNSUPPORTED_MEDIA_TYPE);
             case 429 -> Optional.of(ErrorCodeEnum.RATE_LIMIT_EXCEEDED);
             case 500 -> Optional.of(ErrorCodeEnum.INTERNAL_ERROR);
             default -> Optional.empty();

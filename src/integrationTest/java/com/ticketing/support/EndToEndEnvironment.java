@@ -20,7 +20,7 @@ import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
  * blocking {@code join()} is fine here):
  *
  * <ul>
- *   <li>DynamoDB Local ({@code amazon/dynamodb-local:latest}, shared per JVM) with <b>unique table names</b>: the
+ *   <li>DynamoDB Local ({@code amazon/dynamodb-local:3.3.1}, shared per JVM) with <b>unique table names</b>: the
  *       application creates them itself through its migration runner ({@code ticketing.migrations.enabled=true});</li>
  *   <li>LocalStack 4.9 SQS with unique {@code order-reservation} / {@code order-payment} queues, each with its
  *       dead-letter queue and redrive policy ({@code maxReceiveCount=5}, like {@code init-sqs.sh});</li>

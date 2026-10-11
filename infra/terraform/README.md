@@ -368,8 +368,9 @@ Indicative idle baseline (us-east-1 list prices; check with the AWS Pricing Calc
 * **Dashboard** `<project>-<env>`: edge (requests, 4xx/5xx, p50/p95/p99, WAF allowed/blocked),
   queues (backlog, in flight, age, DLQs), ECS (CPU, memory, running tasks) and DynamoDB (WCU/RCU,
   transaction conflicts, throttles).
-* Tracing: the app propagates W3C `traceparent` (also through SQS attributes). Adding the ADOT
-  collector as a sidecar sends traces to X-Ray without code changes.
+* Tracing: the app propagates a `correlationId` (HTTP header → SQS message attribute → MDC in every log
+  line). W3C `traceparent` propagation and an OTLP exporter are not implemented yet; adding them plus the
+  ADOT collector as a sidecar would send traces to X-Ray.
 
 ---
 
@@ -391,7 +392,7 @@ The task definitions inject configuration with Spring Boot **relaxed binding** n
 | `TICKETING_SECURITY_ISSUER`, `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWKSETURI` | Cognito issuer and JWKS URI |
 | `TICKETING_SECURITY_AUDIENCE`, `TICKETING_SECURITY_ROLESCLAIM` | Cognito app client id (matched against `aud` **or** `client_id`, section 2.5), `cognito:groups` |
 | `TICKETING_PAYMENT_BASEURL` | payment provider URL |
-| `TICKETING_PAYMENT_APIKEY` (worker only) | from Secrets Manager, JSON key `apiKey`. Binds to `ticketing.payment.api-key`; the payment client sends it as `Authorization: Bearer <key>` when it is non-empty (local runs leave it empty). Not yet listed in implementation-spec §9: the injection is kept on purpose so the secret path is in place |
+| `TICKETING_PAYMENT_APIKEY` (worker only) | from Secrets Manager, JSON key `apiKey`. Binds to `ticketing.payment.api-key`; the payment client sends it as `Authorization: Bearer <key>` when it is non-empty (local runs leave it empty). Documented in implementation-spec §11 item 15 |
 | `JAVA_TOOL_OPTIONS` | `-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED` (same flags as the image, which this variable replaces) |
 
 The DynamoDB tables mirror `src/main/resources/db/migrations` attribute by attribute (keys,

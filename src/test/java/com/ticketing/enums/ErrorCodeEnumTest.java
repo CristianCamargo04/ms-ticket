@@ -16,6 +16,11 @@ class ErrorCodeEnumTest {
             "FORBIDDEN,                   403, false",
             "EVENT_NOT_FOUND,             404, false",
             "ORDER_NOT_FOUND,             404, false",
+            "RESOURCE_NOT_FOUND,          404, false",
+            "METHOD_NOT_ALLOWED,          405, false",
+            "NOT_ACCEPTABLE,              406, false",
+            "PAYLOAD_TOO_LARGE,           413, false",
+            "UNSUPPORTED_MEDIA_TYPE,      415, false",
             "EVENT_NOT_ON_SALE,           409, false",
             "SOLD_OUT,                    409, false",
             "INVALID_ORDER_STATE,         409, false",
@@ -35,6 +40,6 @@ class ErrorCodeEnumTest {
 
     @Test
     void shouldDeclareExactlyTheCodesOfTheContract() {
-        assertThat(ErrorCodeEnum.values()).hasSize(17);
+        assertThat(ErrorCodeEnum.values()).hasSize(22);
     }
 }

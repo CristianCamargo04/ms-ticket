@@ -719,16 +719,25 @@ original contract; when they disagree with this section, this section wins.
 ### 12.7 Infrastructure and local environment
 
 1. LocalStack is pinned to `localstack/localstack:4.9` (compose and Testcontainers); compose pins
-   `amazon/dynamodb-local:3.3.1`, while the integration tests still use `amazon/dynamodb-local:latest`.
+   `amazon/dynamodb-local:3.3.1`, the same version the integration tests use.
 2. `.env` uses `LOCAL_AWS_*` names (injected as `AWS_*` only inside the containers) so a developer's exported
    credentials can never be forwarded.
 3. Locally the API validates `iss = http://localhost:8090/default` but downloads the JWKS from
    `http://auth-mock:8080/default/jwks` (hence `jwk-set-uri` + explicit issuer validator, no issuer discovery).
 4. Terraform injects `MANAGEMENT_SERVER_PORT=8081` (actuator off the public listener), the Cognito groups claim as
-   roles (`TICKETING_SECURITY_ROLESCLAIM=cognito:groups`) and the app client id as audience. Known gaps, tracked in
-   `docs/limitations-and-improvements.md` §10: the application validates only `aud` (Cognito access tokens carry
-   `client_id`), does not read `TICKETING_PAYMENT_APIKEY`, takes the first `X-Forwarded-For` hop, does not propagate
-   `traceparent` through SQS, and the `payment-captured-for-released-order` log metric filter is lower case while the
-   log line starts with an upper-case `P`.
-5. `RuntimeModeEnum.apiEnabled()` is not consulted: a `worker` instance still registers the REST controllers (not
-   reachable: no published port locally, no ingress in AWS).
+   roles (`TICKETING_SECURITY_ROLESCLAIM=cognito:groups`) and the app client id as audience. The application matches
+   all of it (section 11 items 14–17): `aud` **or** `client_id` audience validation, `ticketing.payment.api-key` sent as
+   `Authorization: Bearer`, rightmost `X-Forwarded-For` hop, and the `Payment captured for released order` metric
+   filter matches the log line exactly. W3C `traceparent` propagation through SQS attributes is **not** implemented
+   (the correlation id is propagated instead).
+5. In `worker` mode the REST controllers are registered but `WorkerModeApiWebFilter` answers `404` to every `/api/**`
+   request (section 11 item 18).
+6. Framework errors (unknown route 404, 405, 406, 413, 415) carry an `errorCode` (`RESOURCE_NOT_FOUND`,
+   `METHOD_NOT_ALLOWED`, `NOT_ACCEPTABLE`, `PAYLOAD_TOO_LARGE`, `UNSUPPORTED_MEDIA_TYPE`), the static resource handler
+   is disabled (`spring.web.resources.add-mappings=false`) and the 404 detail no longer mentions static resources.
+7. The `TransactWriteItems` `ClientRequestToken` includes a per-request random nonce:
+   `sha256(operation|orderId|sortedTicketIds|nowEpochMillis|nonce)`. SDK retries of one request still reuse it, but two
+   concurrent callers issuing the same command in the same millisecond no longer collapse into one idempotent replay
+   (which reported success to both and duplicated side effects such as payment messages).
+8. `RepublishStaleOrders` gives up on a still-`QUEUED` order (`FAILED`/`DISPATCH_EXHAUSTED`) only after 2 880 republish
+   delays (24 h with the default 30 s), far beyond any realistic worker outage or backlog.

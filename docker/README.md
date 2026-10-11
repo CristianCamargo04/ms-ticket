@@ -168,8 +168,10 @@ AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
 | `customer-1` | `customer-1` | `["CUSTOMER"]` | `ms-ticket` |
 | `customer-2` | `customer-2` | `["CUSTOMER"]` | `ms-ticket` |
 | `admin` | `admin` | `["ADMIN"]` | `ms-ticket` |
+| `load-customer-*` | the client id | `["CUSTOMER"]` | `ms-ticket` |
 
-Any other `client_id` receives a token without `sub`, `roles` or `aud`, which the API rejects (fail
+`load-customer-*` exists for the k6 ticket rush (one subject per virtual user, so the per-subject rate
+limit does not throttle the test) — see [load-test/README.md](../load-test/README.md). Any other `client_id` receives a token without `sub`, `roles` or `aud`, which the API rejects (fail
 closed). The raw call behind `get-token.sh`:
 
 ```bash

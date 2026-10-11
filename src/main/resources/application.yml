@@ -7,6 +7,10 @@ spring:
     name: ms-ticket
   main:
     banner-mode: off
+  web:
+    resources:
+      # Pure JSON API: no static resource handler, so unknown routes are plain 404 problem details.
+      add-mappings: false
   threads:
     virtual:
       # Only affects Spring-managed task executors (scheduling / residual blocking work), never the WebFlux

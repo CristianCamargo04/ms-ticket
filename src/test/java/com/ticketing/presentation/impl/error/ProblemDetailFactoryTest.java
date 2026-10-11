@@ -81,9 +81,10 @@ class ProblemDetailFactoryTest {
         ProblemDetail custom = factory.forStatus(HttpStatusCode.valueOf(599), "custom", exchange());
 
         assertThat(notFound.getStatus()).isEqualTo(404);
-        assertThat(notFound.getTitle()).isEqualTo("Not Found");
-        assertThat(notFound.getProperties()).doesNotContainKey(ProblemDetailFactory.ERROR_CODE)
+        assertThat(notFound.getTitle()).isEqualTo("RESOURCE_NOT_FOUND");
+        assertThat(notFound.getProperties()).containsEntry(ProblemDetailFactory.ERROR_CODE, "RESOURCE_NOT_FOUND")
                 .containsKey(ProblemDetailFactory.TIMESTAMP);
+        assertThat(unavailable.getProperties()).doesNotContainKey(ProblemDetailFactory.ERROR_CODE);
         assertThat(unavailable.getStatus()).isEqualTo(503);
         assertThat(unavailable.getTitle()).isEqualTo("Service Unavailable");
         assertThat(custom.getTitle()).isEqualTo("HTTP 599");

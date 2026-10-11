@@ -88,22 +88,20 @@ producción. Ordenada por impacto.
   QuickSight) para reportes de ventas, conciliación con la pasarela y auditoría; exportaciones
   PITR a un bucket con Object Lock para evidencia inalterable.
 
-## 10. Desalineaciones conocidas entre IaC y aplicación
+## 10. Alineación IaC ↔ aplicación
 
-Detectadas al documentar; afectan solo al despliegue en AWS (local funciona):
+Las desalineaciones detectadas al documentar ya están corregidas en el código: validación de audiencia
+`aud` **o** `client_id` (tokens de acceso de Cognito), `ticketing.payment.api-key` enviada como
+`Authorization: Bearer`, IP del cliente = salto más a la derecha de `X-Forwarded-For` (el que agrega el
+ALB) y el filtro de la alarma `Payment captured for released order` coincide exactamente con el log.
 
-| Tema | IaC / doc de Terraform | Aplicación hoy | Ajuste |
-|---|---|---|---|
-| Audiencia del token | acepta `aud` **o** `client_id` (§2.5) | solo `aud` (`JwtAudienceValidator`) → los access tokens de Cognito serían rechazados | validador propio `aud ∨ client_id` |
-| IP del cliente | salto más a la derecha de `X-Forwarded-For` (§2.3) | primer salto (informativo) | tomar el último salto agregado por el ALB |
-| API key de la pasarela | `TICKETING_PAYMENT_APIKEY` | sin propiedad ni cabecera `Authorization` | agregar `ticketing.payment.api-key` y enviarla |
-| Trazas | propagación `traceparent` por SQS (§5) | no implementada | atributo `traceparent` + exporter OTLP/ADOT |
-| Alarma de cobro liberado | filtro `"payment captured for released order"` | el log empieza con mayúscula | alinear mayúsculas (los filtros distinguen) |
+Pendiente: **trazas distribuidas**. Se propaga el `correlationId` (HTTP → SQS → logs), pero no el
+`traceparent` W3C por atributos SQS ni hay exporter OTLP/ADOT configurado.
 
 ## 11. Otras limitaciones
 
-- **Modo `worker`** registra igualmente los controladores REST (inalcanzables: sin puertos ni
-  ingress). Mejora: condicionarlos a `RuntimeModeEnum.apiEnabled()`.
+- **Modo `worker`** registra los controladores REST, pero `WorkerModeApiWebFilter` responde `404` a
+  todo `/api/**`. Mejora: no registrar los `@RestController` en ese modo (imagen más liviana).
 - **Ciclo de vida del evento**: no hay endpoints para cerrar/cancelar un evento ni cambiar su
   capacidad (`CLOSED` existe en el enum); las entradas son de admisión general (sin mapa de asientos)
   y crear un evento de 20 000 entradas escribe 20 000 ítems en la petición.

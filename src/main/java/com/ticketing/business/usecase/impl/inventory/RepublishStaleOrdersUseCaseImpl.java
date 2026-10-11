@@ -38,10 +38,12 @@ public class RepublishStaleOrdersUseCaseImpl implements RepublishStaleOrdersUseC
     static final String LOCK_NAME = "order-dispatch-sweeper";
 
     /**
-     * Republish delays ({@link OrderPolicy#republishAfter()}) after which a still-queued order is given up (10 minutes
-     * with the default 30 seconds).
+     * Republish delays ({@link OrderPolicy#republishAfter()}) after which a still-queued order is given up: 24 hours
+     * with the default 30 seconds. The window is deliberately much longer than any realistic worker outage or queue
+     * backlog, so a legitimately queued order is never failed just because the consumers were down for a while
+     * (the reservation queue retains messages for 4 days).
      */
-    static final int MAX_DISPATCH_ROUNDS = 20;
+    static final int MAX_DISPATCH_ROUNDS = 2_880;
 
     /** Reason recorded on an order given up after {@link #MAX_DISPATCH_ROUNDS}. */
     static final String DISPATCH_EXHAUSTED = "DISPATCH_EXHAUSTED";
