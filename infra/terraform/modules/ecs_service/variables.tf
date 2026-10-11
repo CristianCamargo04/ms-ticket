@@ -85,6 +85,42 @@ variable "container_port" {
   default     = null
 }
 
+variable "management_port" {
+  description = "Spring Boot management (actuator) port, separate from container_port (management.server.port). When the service has a container_port, ingress_security_group_ids may reach it for load balancer health checks. null = actuator on the application port."
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.management_port == null || try(var.management_port >= 1024 && var.management_port <= 65535, false)
+    error_message = "management_port must be null or an unprivileged port (1024-65535)."
+  }
+}
+
+variable "container_health_check" {
+  description = "Optional container health check (ECS replaces unhealthy tasks; the deployment circuit breaker rolls back releases whose tasks never become healthy). command uses the Docker syntax, e.g. [\"CMD\", \"/usr/local/bin/healthcheck\"]. Times in seconds; start_period <= 300 (Fargate)."
+  type = object({
+    command      = list(string)
+    interval     = optional(number, 15)
+    timeout      = optional(number, 5)
+    retries      = optional(number, 3)
+    start_period = optional(number, 90)
+  })
+  default = null
+
+  validation {
+    condition = var.container_health_check == null || try(
+      contains(["CMD", "CMD-SHELL"], var.container_health_check.command[0]) &&
+      var.container_health_check.interval >= 5 && var.container_health_check.interval <= 300 &&
+      var.container_health_check.timeout >= 2 && var.container_health_check.timeout <= 60 &&
+      var.container_health_check.timeout < var.container_health_check.interval &&
+      var.container_health_check.retries >= 1 && var.container_health_check.retries <= 10 &&
+      var.container_health_check.start_period >= 0 && var.container_health_check.start_period <= 300,
+      false
+    )
+    error_message = "container_health_check: command must start with CMD or CMD-SHELL; interval 5-300, timeout 2-60 (< interval), retries 1-10, start_period 0-300."
+  }
+}
+
 variable "container_user" {
   description = "UID:GID the container runs as. Enforces a non-root user even if the image regresses."
   type        = string
@@ -215,6 +251,12 @@ variable "deployment_alarm_names" {
   description = "CloudWatch alarms that, when firing during a deployment, roll it back automatically."
   type        = list(string)
   default     = []
+}
+
+variable "deployment_alarms_enabled" {
+  description = "Monitor deployment_alarm_names and roll back on ALARM. Break-glass: false to ship the fix of an incident whose alarms already fire (the circuit breaker stays on)."
+  type        = bool
+  default     = true
 }
 
 variable "cpu_target_value" {

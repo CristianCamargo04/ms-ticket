@@ -8,11 +8,17 @@ locals {
 
 # --------------------------------------------------------------------- SQS --
 
+# treat_missing_data = "ignore": CloudWatch only considers a queue "active" (and
+# receives its metrics) for up to six hours after it held messages or was
+# accessed, so a DLQ nobody touches can stop reporting while poison messages are
+# still in it. "notBreaching" would then flip the alarm back to OK; "ignore"
+# keeps the last state until a new datapoint arrives.
+# Also rolls back worker deployments (worker_deployment_alarm_names).
 resource "aws_cloudwatch_metric_alarm" "dlq_not_empty" {
   for_each = var.dlq_names
 
   alarm_name          = "${var.name_prefix}-${each.key}-dlq-not-empty"
-  alarm_description   = "Poison messages in ${each.value}: inspect, fix and redrive (StartMessageMoveTask)."
+  alarm_description   = "Poison messages in ${each.value}: inspect, fix and redrive (StartMessageMoveTask). Also rolls back worker deployments."
   namespace           = "AWS/SQS"
   metric_name         = "ApproximateNumberOfMessagesVisible"
   dimensions          = { QueueName = each.value }
@@ -21,7 +27,7 @@ resource "aws_cloudwatch_metric_alarm" "dlq_not_empty" {
   evaluation_periods  = 1
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "notBreaching"
+  treat_missing_data  = "ignore"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
 
@@ -32,7 +38,7 @@ resource "aws_cloudwatch_metric_alarm" "queue_age" {
   for_each = var.queue_names
 
   alarm_name          = "${var.name_prefix}-${each.key}-oldest-message-age"
-  alarm_description   = "Oldest message in ${each.value} is older than ${var.queue_age_threshold_seconds}s: workers stuck, failing or at max capacity."
+  alarm_description   = "Oldest message in ${each.value} is older than ${var.queue_age_threshold_seconds}s: workers stuck, failing or at max capacity. Also rolls back worker deployments."
   namespace           = "AWS/SQS"
   metric_name         = "ApproximateAgeOfOldestMessage"
   dimensions          = { QueueName = each.value }
@@ -261,6 +267,58 @@ resource "aws_cloudwatch_metric_alarm" "payment_captured_for_released_order" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
+
+  tags = var.tags
+}
+
+# ------------------------------------------------------------------ Lambda --
+# A failing Cognito trigger is user-visible (e.g. a self-signed-up customer
+# without the CUSTOMER group gets 403 on every order endpoint).
+
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  for_each = var.lambda_function_names
+
+  alarm_name          = "${var.name_prefix}-${each.key}-lambda-errors"
+  alarm_description   = "Lambda ${each.value} failed or was throttled. For the Cognito post-confirmation trigger: affected users lack their default group, fix the cause and add them with admin-add-user-to-group."
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+
+  metric_query {
+    id          = "errors"
+    return_data = false
+
+    metric {
+      namespace   = "AWS/Lambda"
+      metric_name = "Errors"
+      dimensions  = { FunctionName = each.value }
+      stat        = "Sum"
+      period      = 300
+    }
+  }
+
+  metric_query {
+    id          = "throttles"
+    return_data = false
+
+    metric {
+      namespace   = "AWS/Lambda"
+      metric_name = "Throttles"
+      dimensions  = { FunctionName = each.value }
+      stat        = "Sum"
+      period      = 300
+    }
+  }
+
+  metric_query {
+    id          = "failures"
+    label       = "Errors + throttles"
+    expression  = "FILL(errors, 0) + FILL(throttles, 0)"
+    return_data = true
+  }
 
   tags = var.tags
 }

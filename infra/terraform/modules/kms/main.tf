@@ -8,7 +8,8 @@
 #      with these keys, it must go through DynamoDB / SQS / Secrets Manager ...
 #      Fine-grained "who" is still decided by IAM policies (task roles).
 #   3. Service principals that encrypt on their own behalf (CloudWatch Logs,
-#      CloudWatch alarms publishing to an encrypted SNS topic).
+#      log delivery writing VPC flow logs to S3, CloudWatch alarms publishing
+#      to an encrypted SNS topic), limited to this account.
 ################################################################################
 
 data "aws_caller_identity" "current" {}
@@ -34,8 +35,9 @@ locals {
       via_services = ["sqs"]
     }
     logs = {
-      description  = "${var.name_prefix} - CloudWatch Logs (application, VPC flow logs, WAF, ECS Exec)"
-      via_services = []
+      description = "${var.name_prefix} - CloudWatch Logs (application, WAF, ECS Exec, Lambda) and VPC flow logs (log group or S3)"
+      # Reading flow logs from S3 (Athena) decrypts through S3 only.
+      via_services = ["s3"]
     }
     platform = {
       description  = "${var.name_prefix} - ECR images, Secrets Manager secrets, SNS alarm topic"
@@ -161,6 +163,35 @@ data "aws_iam_policy_document" "key" {
         test     = "ArnLike"
         variable = "kms:EncryptionContext:aws:logs:arn"
         values   = ["arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:*"]
+      }
+    }
+  }
+
+  # VPC flow logs delivered to an SSE-KMS bucket (AWS documented key policy).
+  dynamic "statement" {
+    for_each = each.key == "logs" ? [1] : []
+
+    content {
+      sid       = "AllowLogDeliveryToEncryptedBucketsOfThisAccountOnly"
+      effect    = "Allow"
+      actions   = ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey*", "kms:ReEncrypt*"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["delivery.logs.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [local.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${local.partition}:logs:${local.region}:${local.account_id}:*"]
       }
     }
   }

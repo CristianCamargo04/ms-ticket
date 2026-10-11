@@ -19,7 +19,7 @@ output "sqs_key_arn" {
 }
 
 output "logs_key_arn" {
-  description = "ARN of the key that encrypts CloudWatch log groups."
+  description = "ARN of the key that encrypts CloudWatch log groups and the VPC flow logs bucket."
   value       = aws_kms_key.this["logs"].arn
 }
 

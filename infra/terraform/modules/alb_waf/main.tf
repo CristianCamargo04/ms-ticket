@@ -55,6 +55,17 @@ resource "aws_vpc_security_group_egress_rule" "targets" {
   to_port           = var.target_port
 }
 
+resource "aws_vpc_security_group_egress_rule" "health_checks" {
+  count = var.health_check_port == null || var.health_check_port == var.target_port ? 0 : 1
+
+  security_group_id = aws_security_group.alb.id
+  description       = "Health checks to the management port of API tasks inside the VPC"
+  cidr_ipv4         = var.vpc_cidr_block
+  ip_protocol       = "tcp"
+  from_port         = var.health_check_port
+  to_port           = var.health_check_port
+}
+
 resource "aws_lb" "this" {
   #checkov:skip=CKV_AWS_150:Deletion protection is variable-driven: true in prod, false in dev so the environment stays disposable.
   name                       = "${var.name_prefix}-alb"
@@ -93,10 +104,12 @@ resource "aws_lb_target_group" "api" {
   deregistration_delay          = 30 # aligned with the app graceful shutdown
   load_balancing_algorithm_type = "least_outstanding_requests"
 
+  # Health checks hit the management port (actuator) directly; the listener only
+  # forwards client traffic to target_port, which does not serve /actuator at all.
   health_check {
     enabled             = true
     path                = var.health_check_path
-    port                = "traffic-port"
+    port                = var.health_check_port == null ? "traffic-port" : tostring(var.health_check_port)
     protocol            = "HTTP"
     matcher             = "200"
     interval            = 15
@@ -147,8 +160,10 @@ resource "aws_lb_listener" "http_redirect" {
   tags = var.tags
 }
 
-# Prometheus/actuator endpoints are only for in-VPC scrapers and ALB health
-# checks (which hit the targets directly, not the listener).
+# Defence in depth for /actuator: the application serves actuator only on the
+# management port (never forwarded by the listener), WAF blocks normalised
+# variants (percent-encoding, //, /./, upper case: waf.tf) and this rule answers
+# 404 for the plain paths at the edge.
 resource "aws_lb_listener_rule" "block_actuator" {
   count = var.block_actuator_paths ? 1 : 0
 

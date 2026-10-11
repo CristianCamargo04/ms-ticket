@@ -39,6 +39,11 @@ output "vpc_endpoint_security_group_id" {
 }
 
 output "flow_logs_log_group_name" {
-  description = "CloudWatch log group receiving VPC flow logs."
-  value       = aws_cloudwatch_log_group.flow_logs.name
+  description = "CloudWatch log group receiving VPC flow logs (null with the S3 destination)."
+  value       = one(aws_cloudwatch_log_group.flow_logs[*].name)
+}
+
+output "flow_logs_bucket" {
+  description = "S3 bucket receiving VPC flow logs in Parquet (null with the CloudWatch Logs destination)."
+  value       = one(aws_s3_bucket.flow_logs[*].id)
 }

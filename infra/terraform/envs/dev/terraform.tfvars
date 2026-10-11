@@ -10,22 +10,27 @@ cost_center         = "CC-TICKETING-NONPROD"
 repository          = "github.com/example-org/ms-ticket"
 
 # Network: 2 AZs, one shared NAT gateway, interface endpoints in a single AZ.
+# Flow logs: only rejected flows, to CloudWatch Logs (small volume, quick to grep).
 vpc_cidr                    = "10.20.0.0/16"
 availability_zones          = ["us-east-1a", "us-east-1b"]
 single_nat_gateway          = true
 interface_endpoint_az_count = 1
+flow_logs_destination       = "cloud-watch-logs"
+flow_logs_traffic_type      = "REJECT"
 
 # Edge
 certificate_arn              = "arn:aws:acm:us-east-1:111111111111:certificate/00000000-0000-0000-0000-000000000000"
 waf_rate_limit_per_ip        = 2000
 waf_orders_rate_limit_per_ip = 100
 
-# Auth: Essentials tier (no threat protection), MFA optional.
+# Auth: Essentials tier (no threat protection), MFA optional. E-mails from the
+# Cognito default sender (daily cap, fine for a team); set an SES identity to lift it.
 auth_callback_urls          = ["http://localhost:3000/callback", "https://app.dev.example.com/callback"]
 auth_logout_urls            = ["http://localhost:3000/", "https://app.dev.example.com/"]
 auth_mfa_configuration      = "OPTIONAL"
 auth_user_pool_tier         = "ESSENTIALS"
 auth_advanced_security_mode = "OFF"
+auth_ses_identity_arn       = null
 
 # Workloads: one task each, all on Fargate Spot (interruptions are acceptable in dev).
 image_tag                   = "0.1.0" # CI overrides: -var image_tag=<git sha>

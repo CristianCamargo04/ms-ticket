@@ -19,7 +19,7 @@ output "jwks_uri" {
 }
 
 output "web_client_id" {
-  description = "App client ID of the web client (\"client_id\" claim of access tokens, \"aud\" of ID tokens)."
+  description = "App client ID of the web client (\"client_id\" claim of access tokens, \"aud\" of ID tokens): the API audience (its validator accepts aud OR client_id)."
   value       = aws_cognito_user_pool_client.web.id
 }
 
@@ -41,4 +41,29 @@ output "group_names" {
 output "hosted_domain" {
   description = "Base URL of the Cognito hosted login / OAuth2 endpoints."
   value       = "https://${aws_cognito_user_pool_domain.this.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+}
+
+output "self_signup_group" {
+  description = "Group every self-signed-up user joins (post-confirmation trigger)."
+  value       = local.self_signup_group
+}
+
+output "post_confirmation_function_name" {
+  description = "Name of the post-confirmation trigger Lambda (alarm on its errors)."
+  value       = aws_lambda_function.post_confirmation.function_name
+}
+
+output "post_confirmation_function_arn" {
+  description = "ARN of the post-confirmation trigger Lambda."
+  value       = aws_lambda_function.post_confirmation.arn
+}
+
+output "email_sending_account" {
+  description = "COGNITO_DEFAULT (built-in sender, daily cap: dev only) or DEVELOPER (SES identity)."
+  value       = local.email_sending_account
+}
+
+output "post_confirmation_trigger_arn" {
+  description = "Lambda ARN configured as the user pool's post-confirmation trigger (read back from the pool)."
+  value       = aws_cognito_user_pool.this.lambda_config[0].post_confirmation
 }

@@ -14,7 +14,7 @@ locals {
       range_key  = null
       attributes = [{ name = "eventId", type = "S" }, { name = "status", type = "S" }, { name = "eventDate", type = "N" }]
       global_secondary_indexes = [
-        { name = "status-eventDate-index", hash_key = "status", range_key = "eventDate", projection_type = "ALL" },
+        { name = "status-eventDate-index", hash_key = "status", range_key = "eventDate", projection_type = "ALL", non_key_attributes = null },
       ]
       ttl_attribute = null
     }
@@ -23,8 +23,16 @@ locals {
       range_key  = "ticketId"
       attributes = [{ name = "eventId", type = "S" }, { name = "ticketId", type = "S" }, { name = "statusKey", type = "S" }]
       global_secondary_indexes = [
-        # KEYS_ONLY: free-ticket selection only needs the keys (cheaper index writes).
-        { name = "eventId-statusKey-index", hash_key = "eventId", range_key = "statusKey", projection_type = "KEYS_ONLY" },
+        # INCLUDE (implementation-spec section 11.5): findAvailable builds a full
+        # TicketData for AVAILABLE tickets (orderId/holdExpiresAt are absent) without
+        # a second read, while index items stay small (cheaper index writes than ALL).
+        {
+          name               = "eventId-statusKey-index"
+          hash_key           = "eventId"
+          range_key          = "statusKey"
+          projection_type    = "INCLUDE"
+          non_key_attributes = ["status", "version", "updatedAt"]
+        },
       ]
       ttl_attribute = null
     }
@@ -34,7 +42,7 @@ locals {
       attributes = [{ name = "orderId", type = "S" }, { name = "deadlinePartition", type = "S" }, { name = "deadlineAt", type = "N" }]
       global_secondary_indexes = [
         # Sparse index: only orders waiting for a future action carry deadlinePartition/deadlineAt.
-        { name = "deadline-index", hash_key = "deadlinePartition", range_key = "deadlineAt", projection_type = "ALL" },
+        { name = "deadline-index", hash_key = "deadlinePartition", range_key = "deadlineAt", projection_type = "ALL", non_key_attributes = null },
       ]
       ttl_attribute = null
     }
@@ -87,8 +95,9 @@ resource "aws_dynamodb_table" "this" {
     for_each = each.value.global_secondary_indexes
 
     content {
-      name            = global_secondary_index.value.name
-      projection_type = global_secondary_index.value.projection_type
+      name               = global_secondary_index.value.name
+      projection_type    = global_secondary_index.value.projection_type
+      non_key_attributes = global_secondary_index.value.non_key_attributes
 
       key_schema {
         attribute_name = global_secondary_index.value.hash_key

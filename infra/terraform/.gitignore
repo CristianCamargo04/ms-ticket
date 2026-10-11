@@ -12,3 +12,6 @@
 **/override.tf.json
 **/*_override.tf
 **/*_override.tf.json
+
+# Lambda packages built by archive_file during plan.
+**/.build/

@@ -47,14 +47,47 @@ variable "interface_endpoint_az_count" {
 }
 
 variable "flow_logs_kms_key_arn" {
-  description = "KMS key ARN that encrypts the VPC flow logs log group."
+  description = "KMS key ARN that encrypts the VPC flow logs (log group or S3 bucket). Its key policy must let delivery.logs.amazonaws.com use it for S3 delivery."
   type        = string
 }
 
+variable "flow_logs_destination" {
+  description = "Where VPC flow logs go: \"s3\" (Parquet, lifecycle-managed, cheapest per GB: prod) or \"cloud-watch-logs\" (KMS-encrypted log group: dev, ideally with REJECT only)."
+  type        = string
+  default     = "s3"
+
+  validation {
+    condition     = contains(["s3", "cloud-watch-logs"], var.flow_logs_destination)
+    error_message = "flow_logs_destination must be s3 or cloud-watch-logs."
+  }
+}
+
 variable "flow_logs_retention_days" {
-  description = "Retention of the VPC flow logs log group."
+  description = "Retention of the VPC flow logs (log group retention, or S3 object expiration)."
   type        = number
   default     = 30
+
+  validation {
+    condition     = var.flow_logs_destination == "s3" || contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.flow_logs_retention_days)
+    error_message = "flow_logs_retention_days must be a value supported by CloudWatch Logs when flow_logs_destination = cloud-watch-logs."
+  }
+}
+
+variable "flow_logs_s3_tiering_days" {
+  description = "Days before flow log objects move to S3 Intelligent-Tiering (S3 destination only); must be lower than flow_logs_retention_days."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.flow_logs_s3_tiering_days >= 0 && (var.flow_logs_destination != "s3" || var.flow_logs_s3_tiering_days < var.flow_logs_retention_days)
+    error_message = "flow_logs_s3_tiering_days must be >= 0 and lower than flow_logs_retention_days."
+  }
+}
+
+variable "flow_logs_force_destroy" {
+  description = "Allow destroying the flow logs bucket while it still has objects (dev convenience only)."
+  type        = bool
+  default     = false
 }
 
 variable "flow_logs_traffic_type" {

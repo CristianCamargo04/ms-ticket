@@ -28,6 +28,14 @@ output "api_deployment_alarm_names" {
   value       = [aws_cloudwatch_metric_alarm.alb_5xx_rate.alarm_name, aws_cloudwatch_metric_alarm.target_p99_latency.alarm_name]
 }
 
+output "worker_deployment_alarm_names" {
+  description = "Alarms that roll back a worker deployment when they fire (a DLQ receives messages, or the oldest message of a work queue gets too old)."
+  value = concat(
+    [for queue in sort(keys(var.dlq_names)) : aws_cloudwatch_metric_alarm.dlq_not_empty[queue].alarm_name],
+    [for queue in sort(keys(var.queue_names)) : aws_cloudwatch_metric_alarm.queue_age[queue].alarm_name],
+  )
+}
+
 output "dashboard_name" {
   description = "CloudWatch dashboard name."
   value       = aws_cloudwatch_dashboard.this.dashboard_name

@@ -187,6 +187,14 @@ mock_provider "aws" {
     }
   }
 
+  mock_resource "aws_lambda_function" {
+    defaults = {
+      arn           = "arn:aws:lambda:us-east-1:222222222222:function:mock"
+      invoke_arn    = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:222222222222:function:mock/invocations"
+      qualified_arn = "arn:aws:lambda:us-east-1:222222222222:function:mock:1"
+    }
+  }
+
   mock_resource "aws_ecs_task_definition" {
     defaults = {
       arn = "arn:aws:ecs:us-east-1:222222222222:task-definition/mock:1"
@@ -227,6 +235,16 @@ run "environment_matches_application_contracts" {
 
   assert {
     condition = (
+      module.dynamodb.index_projections["tickets/eventId-statusKey-index"].projection_type == "INCLUDE" &&
+      join(",", module.dynamodb.index_projections["tickets/eventId-statusKey-index"].non_key_attributes) == "status,updatedAt,version" &&
+      module.dynamodb.index_projections["events/status-eventDate-index"].projection_type == "ALL" &&
+      module.dynamodb.index_projections["orders/deadline-index"].projection_type == "ALL"
+    )
+    error_message = "eventId-statusKey-index must project INCLUDE [status, version, updatedAt] (implementation-spec 11.5: findAvailable builds TicketData from the index)."
+  }
+
+  assert {
+    condition = (
       module.sqs.queue_names["order-reservation"] == "ms-ticket-prod-order-reservation" &&
       module.sqs.queue_names["order-payment"] == "ms-ticket-prod-order-payment" &&
       module.sqs.dlq_names["order-reservation"] == "ms-ticket-prod-order-reservation-dlq" &&
@@ -259,6 +277,52 @@ run "environment_matches_application_contracts" {
     condition     = length(module.observability.api_deployment_alarm_names) == 2
     error_message = "API deployments must be guarded by the 5xx-rate and p99 alarms."
   }
+
+  assert {
+    condition     = length(module.observability.worker_deployment_alarm_names) == 4
+    error_message = "Worker deployments must be guarded by the DLQ-not-empty and oldest-message-age alarms of both queues."
+  }
+
+  assert {
+    condition     = local.common_environment["MANAGEMENT_SERVER_PORT"] == "8081" && local.common_environment["HEALTHCHECK_PORT"] == "8081"
+    error_message = "Actuator must run on the management port 8081 (never routed by the ALB listener), and the image probe must target it."
+  }
+
+  assert {
+    condition     = module.auth.self_signup_group == "CUSTOMER" && contains(module.auth.group_names, "CUSTOMER")
+    error_message = "Self-signed-up users must join the CUSTOMER group, otherwise every new customer gets 403."
+  }
+
+  assert {
+    condition     = module.auth.post_confirmation_trigger_arn == module.auth.post_confirmation_function_arn
+    error_message = "The post-confirmation Lambda must be wired as the user pool trigger."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in concat(data.aws_iam_policy_document.api_task.statement, data.aws_iam_policy_document.worker_task.statement) :
+      !contains(tolist(statement.actions), "dynamodb:ConditionCheckItem")
+    ])
+    error_message = "No transaction uses ConditionCheck items: dynamodb:ConditionCheckItem must not be granted."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.api_task.statement :
+      !contains(tolist(statement.actions), "dynamodb:BatchGetItem")
+    ])
+    error_message = "No API use case reads tickets in batch: the API must not get dynamodb:BatchGetItem."
+  }
+
+  assert {
+    condition     = module.auth.email_sending_account == "DEVELOPER"
+    error_message = "prod must send Cognito e-mails through SES (the default sender is capped per day)."
+  }
+
+  assert {
+    condition     = module.network.flow_logs_bucket != null && module.network.flow_logs_log_group_name == null
+    error_message = "prod sends flow logs to S3 (Parquet + lifecycle), not to CloudWatch Logs."
+  }
 }
 
 run "rejects_mutable_latest_tag" {
@@ -289,4 +353,14 @@ run "rejects_destroy_with_data_in_prod" {
   }
 
   expect_failures = [var.allow_destroy_with_data]
+}
+
+run "rejects_cognito_default_email_in_prod" {
+  command = plan
+
+  variables {
+    auth_ses_identity_arn = null
+  }
+
+  expect_failures = [var.auth_ses_identity_arn]
 }

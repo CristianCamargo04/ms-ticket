@@ -4,11 +4,21 @@
 #
 # Notes
 #  - TransactWriteItems is not an IAM action: DynamoDB authorizes every item of
-#    a transaction with its own action (UpdateItem / PutItem / ConditionCheckItem).
-#  - ticket-transitions is append-only for everybody (PutItem, never Update/Delete):
-#    the audit trail cannot be rewritten by the application.
-#  - No DeleteItem/Scan/DescribeTable/CreateTable anywhere; DeleteItem only on the
-#    lock table (lease release).
+#    a transaction with its own action. The transactions of implementation-spec
+#    6.3 only contain Update (event, tickets, order) and Put (audit) items, so
+#    dynamodb:ConditionCheckItem is granted to nobody.
+#  - ticket-transitions: no UpdateItem/DeleteItem for anybody, but PutItem CAN
+#    overwrite an existing record. The application only inserts (condition
+#    attribute_not_exists(ticketKey)); IAM has no condition key that forces a
+#    ConditionExpression, so this is insert-only by code, not tamper-proof
+#    against a compromised task role. Tamper evidence = PITR + scheduled
+#    ExportTableToPointInTime into an S3 bucket with Object Lock (compliance
+#    mode); see README 2.1.
+#  - BatchWriteItem (API, ticket pre-generation) authorizes PutRequest AND
+#    DeleteRequest alike: IAM cannot restrict the request type. Accepted: it is
+#    scoped to the tickets table and the code only sends PutRequests.
+#  - No Scan/DescribeTable/CreateTable anywhere; DeleteItem only on the lock
+#    table (lease release).
 ################################################################################
 
 locals {
@@ -23,9 +33,10 @@ locals {
 
 data "aws_iam_policy_document" "api_task" {
   statement {
+    # PutItem: CreateEvent; UpdateItem: status changes and confirm/release transactions.
     sid       = "Events"
     effect    = "Allow"
-    actions   = ["dynamodb:ConditionCheckItem", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
     resources = [local.tables["events"]]
   }
 
@@ -37,22 +48,25 @@ data "aws_iam_policy_document" "api_task" {
   }
 
   statement {
-    # BatchWriteItem: ticket pre-generation when an event is created (CreateEventUseCase).
+    # BatchWriteItem: ticket pre-generation when an event is created (CreateEvent,
+    # PutRequests only - see notes). UpdateItem: confirm/release transactions.
+    # No BatchGetItem: no API use case reads tickets in batch (the worker does).
     sid       = "Tickets"
     effect    = "Allow"
-    actions   = ["dynamodb:BatchGetItem", "dynamodb:BatchWriteItem", "dynamodb:ConditionCheckItem", "dynamodb:GetItem", "dynamodb:UpdateItem"]
+    actions   = ["dynamodb:BatchWriteItem", "dynamodb:GetItem", "dynamodb:UpdateItem"]
     resources = [local.tables["tickets"]]
   }
 
   statement {
     sid       = "Orders"
     effect    = "Allow"
-    actions   = ["dynamodb:ConditionCheckItem", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
     resources = [local.tables["orders"]]
   }
 
   statement {
-    sid       = "TicketTransitionsAppendAndRead"
+    # Insert (conditional PutItem in transactions) + ticket history; no Update/Delete.
+    sid       = "TicketTransitionsInsertAndRead"
     effect    = "Allow"
     actions   = ["dynamodb:PutItem", "dynamodb:Query"]
     resources = [local.tables["ticket-transitions"]]
@@ -100,18 +114,20 @@ data "aws_iam_policy_document" "worker_task" {
   statement {
     sid       = "EventCounters"
     effect    = "Allow"
-    actions   = ["dynamodb:ConditionCheckItem", "dynamodb:GetItem", "dynamodb:UpdateItem"]
+    actions   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
     resources = [local.tables["events"]]
   }
 
   statement {
+    # BatchGetItem: TicketPersistence.findByIds; UpdateItem: inventory transactions.
     sid       = "Tickets"
     effect    = "Allow"
-    actions   = ["dynamodb:BatchGetItem", "dynamodb:ConditionCheckItem", "dynamodb:GetItem", "dynamodb:UpdateItem"]
+    actions   = ["dynamodb:BatchGetItem", "dynamodb:GetItem", "dynamodb:UpdateItem"]
     resources = [local.tables["tickets"]]
   }
 
   statement {
+    # TicketPersistence.findAvailable (INCLUDE projection: no second read).
     sid       = "SelectAvailableTickets"
     effect    = "Allow"
     actions   = ["dynamodb:Query"]
@@ -121,7 +137,7 @@ data "aws_iam_policy_document" "worker_task" {
   statement {
     sid       = "Orders"
     effect    = "Allow"
-    actions   = ["dynamodb:ConditionCheckItem", "dynamodb:GetItem", "dynamodb:UpdateItem"]
+    actions   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
     resources = [local.tables["orders"]]
   }
 
@@ -133,7 +149,8 @@ data "aws_iam_policy_document" "worker_task" {
   }
 
   statement {
-    sid       = "TicketTransitionsAppendOnly"
+    # Insert only (conditional PutItem in transactions); see notes on overwrites.
+    sid       = "TicketTransitionsInsertOnly"
     effect    = "Allow"
     actions   = ["dynamodb:PutItem"]
     resources = [local.tables["ticket-transitions"]]

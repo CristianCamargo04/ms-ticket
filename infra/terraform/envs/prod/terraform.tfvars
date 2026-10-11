@@ -10,10 +10,13 @@ cost_center         = "CC-TICKETING-PROD"
 repository          = "github.com/example-org/ms-ticket"
 
 # Network: 3 AZs, one NAT gateway per AZ, interface endpoints in every AZ.
+# Flow logs: all traffic, Parquet in S3 (Athena), Intelligent-Tiering then expiry.
 vpc_cidr                    = "10.30.0.0/16"
 availability_zones          = ["us-east-1a", "us-east-1b", "us-east-1c"]
 single_nat_gateway          = false
 interface_endpoint_az_count = null
+flow_logs_destination       = "s3"
+flow_logs_traffic_type      = "ALL"
 
 # Edge
 certificate_arn              = "arn:aws:acm:us-east-1:222222222222:certificate/00000000-0000-0000-0000-000000000000"
@@ -26,6 +29,9 @@ auth_logout_urls            = ["https://tickets.example.com/"]
 auth_mfa_configuration      = "OPTIONAL"
 auth_user_pool_tier         = "PLUS"
 auth_advanced_security_mode = "ENFORCED"
+# E-mails through SES (verified domain, production access granted): required in prod.
+auth_ses_identity_arn   = "arn:aws:ses:us-east-1:222222222222:identity/example.com"
+auth_email_from_address = "ms-ticket <no-reply@example.com>"
 
 # Workloads
 image_tag                   = "0.1.0" # CI overrides: -var image_tag=<git sha> (promoted from dev)
@@ -69,7 +75,7 @@ allow_destroy_with_data           = false
 kms_deletion_window_days          = 30
 point_in_time_recovery_days       = 35
 secret_recovery_window_days       = 30
-contributor_insights_mode         = "ACCESSED_AND_THROTTLED_KEYS"
+contributor_insights_mode         = "THROTTLED_KEYS" # ACCESSED_AND_THROTTLED_KEYS only while investigating
 dynamodb_max_on_demand_throughput = null
 
 # Observability: one year of logs (audit / incident forensics).

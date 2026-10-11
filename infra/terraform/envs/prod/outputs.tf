@@ -48,6 +48,11 @@ output "cognito_web_client_id" {
   value       = module.auth.web_client_id
 }
 
+output "cognito_email_sending_account" {
+  description = "COGNITO_DEFAULT (built-in sender with a daily cap) or DEVELOPER (SES)."
+  value       = module.auth.email_sending_account
+}
+
 output "cognito_hosted_domain" {
   description = "Cognito hosted login / OAuth2 base URL."
   value       = module.auth.hosted_domain
@@ -81,6 +86,11 @@ output "alarm_topic_arn" {
 output "dashboard_url" {
   description = "CloudWatch dashboard."
   value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${module.observability.dashboard_name}"
+}
+
+output "flow_logs_bucket" {
+  description = "S3 bucket with the VPC flow logs in Parquet (query with Athena); null when they go to CloudWatch Logs."
+  value       = module.network.flow_logs_bucket
 }
 
 output "nat_gateway_public_ips" {

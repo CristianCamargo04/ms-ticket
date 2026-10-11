@@ -1,9 +1,12 @@
 ################################################################################
 # Amazon Cognito: identity provider of the API (OAuth2 / OIDC, ADR-007).
 #   - Groups ADMIN / CUSTOMER  -> "cognito:groups" claim -> ROLE_ADMIN / ROLE_CUSTOMER
+#   - Self-signed-up users join CUSTOMER (post-confirmation trigger)
 #   - Resource server "ms-ticket" with custom scopes
 #   - Public web client: authorization code + PKCE, no client secret
-# The API validates issuer + signature (JWKS) + audience + roles; see README.
+#   - E-mails through SES (DEVELOPER) when an identity is given (required in prod)
+# The API validates issuer + signature (JWKS) + audience (aud OR client_id) +
+# roles; see README.
 ################################################################################
 
 data "aws_caller_identity" "current" {}
@@ -17,6 +20,14 @@ locals {
     ADMIN    = { precedence = 0, description = "Back-office operators: create events, issue complimentary tickets, read any order" }
     CUSTOMER = { precedence = 10, description = "Ticket buyers: place, confirm and cancel their own orders" }
   }
+
+  # Group of every self-signed-up user (never ADMIN). A literal on purpose: the
+  # trigger cannot reference the group resource (pool -> trigger -> group -> pool).
+  self_signup_group = "CUSTOMER"
+
+  # Cognito's built-in sender is capped at a few dozen e-mails per day per
+  # account (sign-up codes, password resets): fine for dev, never for prod.
+  email_sending_account = var.ses_identity_arn == null ? "COGNITO_DEFAULT" : "DEVELOPER"
 
   scopes = {
     "orders.read"  = "Read the caller's own orders"
@@ -66,6 +77,21 @@ resource "aws_cognito_user_pool" "this" {
     attributes_require_verification_before_update = ["email"]
   }
 
+  # DEVELOPER: Cognito sends through the given SES identity (verified, out of the
+  # SES sandbox) with its service-linked role AWSServiceRoleForAmazonCognitoIdpEmailService;
+  # SES quotas apply instead of the built-in daily cap.
+  email_configuration {
+    email_sending_account  = local.email_sending_account
+    source_arn             = var.ses_identity_arn
+    from_email_address     = local.email_sending_account == "DEVELOPER" ? var.email_from_address : null
+    reply_to_email_address = local.email_sending_account == "DEVELOPER" ? var.email_reply_to_address : null
+    configuration_set      = local.email_sending_account == "DEVELOPER" ? var.ses_configuration_set : null
+  }
+
+  lambda_config {
+    post_confirmation = aws_lambda_function.post_confirmation.arn
+  }
+
   # Threat protection: compromised-credential checks and adaptive authentication.
   dynamic "user_pool_add_ons" {
     for_each = var.user_pool_tier == "PLUS" ? [var.advanced_security_mode] : []
@@ -94,6 +120,11 @@ resource "aws_cognito_user_pool" "this" {
     precondition {
       condition     = var.advanced_security_mode == "OFF" || var.user_pool_tier == "PLUS"
       error_message = "advanced_security_mode AUDIT/ENFORCED requires user_pool_tier = PLUS."
+    }
+
+    precondition {
+      condition     = contains(keys(local.groups), local.self_signup_group) && local.self_signup_group != "ADMIN"
+      error_message = "The self-signup group must be an existing, non-administrative group."
     }
   }
 }

@@ -101,6 +101,18 @@ variable "interface_endpoint_az_count" {
   default     = null
 }
 
+variable "flow_logs_destination" {
+  description = "VPC flow logs destination: s3 (Parquet + lifecycle, prod) or cloud-watch-logs (dev, with REJECT only)."
+  type        = string
+  default     = "s3"
+}
+
+variable "flow_logs_traffic_type" {
+  description = "Flow log traffic: ALL (prod, to S3) or REJECT (dev: denied flows only, a fraction of the volume)."
+  type        = string
+  default     = "ALL"
+}
+
 # ------------------------------------------------------------- edge / TLS ----
 
 variable "certificate_arn" {
@@ -171,6 +183,40 @@ variable "auth_advanced_security_mode" {
   }
 }
 
+variable "auth_ses_identity_arn" {
+  description = "Verified SES identity (out of the SES sandbox) for Cognito e-mails (sign-up codes, password resets). null = Cognito default sender, capped at a few dozen e-mails per day: dev only."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.environment != "prod" || var.auth_ses_identity_arn != null
+    error_message = "auth_ses_identity_arn is required in prod: the Cognito default e-mail sender is capped at a few dozen e-mails per day."
+  }
+}
+
+variable "auth_email_from_address" {
+  description = "Sender of Cognito e-mails (an address of the SES identity), e.g. \"Tickets <no-reply@example.com>\". Required with auth_ses_identity_arn."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.auth_ses_identity_arn == null || var.auth_email_from_address != null
+    error_message = "auth_email_from_address is required when auth_ses_identity_arn is set."
+  }
+}
+
+variable "auth_email_reply_to_address" {
+  description = "Optional Reply-To of Cognito e-mails (SES sending only)."
+  type        = string
+  default     = null
+}
+
+variable "auth_trigger_xray_tracing" {
+  description = "Active X-Ray tracing on the Cognito post-confirmation trigger Lambda."
+  type        = bool
+  default     = false
+}
+
 # -------------------------------------------------------------- workloads ----
 
 variable "image_tag" {
@@ -214,6 +260,12 @@ variable "enable_execute_command" {
     condition     = !(var.environment == "prod" && var.enable_execute_command)
     error_message = "ECS Exec must be disabled in prod."
   }
+}
+
+variable "deployment_alarm_rollback" {
+  description = "Roll back API/worker deployments when their guard alarms fire (5xx, p99; DLQ, queue age). Break-glass: -var deployment_alarm_rollback=false to ship the fix of an incident whose alarms already fire (circuit breaker stays on)."
+  type        = bool
+  default     = true
 }
 
 variable "enhanced_container_insights" {
@@ -309,9 +361,9 @@ variable "dynamodb_max_on_demand_throughput" {
 }
 
 variable "contributor_insights_mode" {
-  description = "DynamoDB Contributor Insights mode: ACCESSED_AND_THROTTLED_KEYS or THROTTLED_KEYS (cheaper)."
+  description = "DynamoDB Contributor Insights mode: THROTTLED_KEYS (default: hot keys that are actually throttled, cheap) or ACCESSED_AND_THROTTLED_KEYS (every request analysed: enable temporarily to investigate)."
   type        = string
-  default     = "ACCESSED_AND_THROTTLED_KEYS"
+  default     = "THROTTLED_KEYS"
 }
 
 variable "secret_recovery_window_days" {
@@ -328,12 +380,12 @@ variable "secret_recovery_window_days" {
 # ---------------------------------------------------------- observability ----
 
 variable "log_retention_days" {
-  description = "Retention of application and ECS Exec logs."
+  description = "Retention of application, ECS Exec and Cognito trigger logs."
   type        = number
 }
 
 variable "flow_logs_retention_days" {
-  description = "Retention of VPC flow logs."
+  description = "Retention of VPC flow logs (log group retention or S3 expiration)."
   type        = number
 }
 

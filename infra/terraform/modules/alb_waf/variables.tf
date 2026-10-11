@@ -62,6 +62,17 @@ variable "health_check_path" {
   default     = "/actuator/health/readiness"
 }
 
+variable "health_check_port" {
+  description = "Port of the target health checks: the Spring Boot management port (management.server.port), separate from target_port so that /actuator is never reachable through the listener. null = traffic port."
+  type        = number
+  default     = 8081
+
+  validation {
+    condition     = var.health_check_port == null || try(var.health_check_port >= 1024 && var.health_check_port <= 65535, false)
+    error_message = "health_check_port must be null or an unprivileged port (1024-65535)."
+  }
+}
+
 variable "idle_timeout" {
   description = "ALB idle timeout in seconds. Above the default 60 s so that quiet SSE availability streams are not cut."
   type        = number
@@ -75,7 +86,7 @@ variable "deletion_protection" {
 }
 
 variable "block_actuator_paths" {
-  description = "Answer 404 at the edge for /actuator/** (metrics/health stay reachable only from inside the VPC)."
+  description = "Answer 404 at the edge for /actuator/**: ALB listener rule for the plain paths plus a WAF rule on the URL-decoded, path-normalised, lower-cased path (encoding tricks)."
   type        = bool
   default     = true
 }

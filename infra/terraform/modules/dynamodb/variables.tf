@@ -37,9 +37,9 @@ variable "contributor_insights_tables" {
 }
 
 variable "contributor_insights_mode" {
-  description = "ACCESSED_AND_THROTTLED_KEYS (full visibility) or THROTTLED_KEYS (cheaper: only throttled keys are analysed)."
+  description = "THROTTLED_KEYS (default: only throttled keys are analysed, which is what matters to find a hot partition, at a fraction of the cost) or ACCESSED_AND_THROTTLED_KEYS (every request is a Contributor Insights event: switch to it temporarily while investigating)."
   type        = string
-  default     = "ACCESSED_AND_THROTTLED_KEYS"
+  default     = "THROTTLED_KEYS"
 
   validation {
     condition     = contains(["ACCESSED_AND_THROTTLED_KEYS", "THROTTLED_KEYS"], var.contributor_insights_mode)

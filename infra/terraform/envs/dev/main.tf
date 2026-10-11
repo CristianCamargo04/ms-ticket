@@ -8,6 +8,12 @@ locals {
   name_prefix = "${var.project}-${var.environment}"
   image       = "${module.ecr.repository_url}:${var.image_tag}"
 
+  # Spring Boot actuator runs on its own port in AWS (management.server.port):
+  # only the ALB health checks (and the container health check) reach it, the
+  # listener forwards client traffic to 8080 only, so /actuator is never public.
+  app_port        = 8080
+  management_port = 8081
+
   # Spring Boot relaxed binding: aws.dynamodb.tables.ticketTransitions <-
   # AWS_DYNAMODB_TABLES_TICKETTRANSITIONS, etc. (implementation-spec section 8).
   # OS environment variables override application-prod.yml.
@@ -23,13 +29,18 @@ locals {
     AWS_SQS_ORDERPAYMENTQUEUE             = module.sqs.queue_names["order-payment"]
     TICKETING_MIGRATIONS_ENABLED          = "false" # Terraform owns the schema in AWS
     TICKETING_PAYMENT_BASEURL             = var.payment_gateway_base_url
-    # Cognito (ADR-007): signature via JWKS, issuer, audience = app client id
-    # ("client_id" claim of access tokens), roles = Cognito groups.
+    MANAGEMENT_SERVER_PORT                = tostring(local.management_port)
+    HEALTHCHECK_PORT                      = tostring(local.management_port) # image probe /usr/local/bin/healthcheck
+    # Cognito (ADR-007): signature via JWKS, issuer, roles = Cognito groups.
+    # Audience: Cognito ACCESS tokens have no "aud" claim; the app client id is in
+    # "client_id" (ID tokens: "aud"). The API audience validator accepts "aud" OR
+    # "client_id" equal to ticketing.security.audience.
     TICKETING_SECURITY_ISSUER                           = module.auth.issuer_uri
     TICKETING_SECURITY_AUDIENCE                         = module.auth.web_client_id
     TICKETING_SECURITY_ROLESCLAIM                       = "cognito:groups"
     SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWKSETURI = module.auth.jwks_uri
-    JAVA_TOOL_OPTIONS                                   = "-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
+    # Same flags as the image (this variable replaces the image's value).
+    JAVA_TOOL_OPTIONS = "-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED"
   }
 
   # Both spellings: TICKETING_RUNTIME_MODE (placeholder used by docker-compose /
@@ -58,8 +69,11 @@ module "network" {
   availability_zones          = var.availability_zones
   single_nat_gateway          = var.single_nat_gateway
   interface_endpoint_az_count = var.interface_endpoint_az_count
+  flow_logs_destination       = var.flow_logs_destination
+  flow_logs_traffic_type      = var.flow_logs_traffic_type
   flow_logs_kms_key_arn       = module.kms.logs_key_arn
   flow_logs_retention_days    = var.flow_logs_retention_days
+  flow_logs_force_destroy     = var.allow_destroy_with_data
 }
 
 module "auth" {
@@ -72,6 +86,16 @@ module "auth" {
   deletion_protection    = var.deletion_protection
   callback_urls          = var.auth_callback_urls
   logout_urls            = var.auth_logout_urls
+
+  # E-mails through SES (required in prod: the Cognito default sender has a daily cap).
+  ses_identity_arn       = var.auth_ses_identity_arn
+  email_from_address     = var.auth_email_from_address
+  email_reply_to_address = var.auth_email_reply_to_address
+
+  # Post-confirmation trigger (self-signed-up users join CUSTOMER).
+  logs_kms_key_arn     = module.kms.logs_key_arn
+  log_retention_days   = var.log_retention_days
+  trigger_xray_tracing = var.auth_trigger_xray_tracing
 }
 
 # Payment provider API key: the value is set out-of-band (never in code/state):
@@ -123,6 +147,8 @@ module "alb_waf" {
   vpc_id                       = module.network.vpc_id
   vpc_cidr_block               = module.network.vpc_cidr_block
   public_subnet_ids            = module.network.public_subnet_ids
+  target_port                  = local.app_port
+  health_check_port            = local.management_port
   certificate_arn              = var.certificate_arn
   deletion_protection          = var.deletion_protection
   force_destroy_logs_bucket    = var.allow_destroy_with_data
@@ -165,17 +191,19 @@ module "api" {
   cpu                = var.api.cpu
   memory             = var.api.memory
   cpu_architecture   = var.cpu_architecture
-  container_port     = 8080
+  container_port     = local.app_port
+  management_port    = local.management_port # ALB health checks only
 
   environment           = merge(local.common_environment, local.runtime_mode_environment.api)
   task_role_policy_json = data.aws_iam_policy_document.api_task.json
   log_group_name        = module.observability.service_log_group_names["api"]
   log_group_arn         = module.observability.service_log_group_arns["api"]
 
-  # Only the ALB may reach the API tasks.
+  # Only the ALB may reach the API tasks (8080 traffic, 8081 health checks).
   load_balancer_target_group_arn = module.alb_waf.target_group_arn
   ingress_security_group_ids     = [module.alb_waf.alb_security_group_id]
   deployment_alarm_names         = module.observability.api_deployment_alarm_names
+  deployment_alarms_enabled      = var.deployment_alarm_rollback
 
   desired_count              = var.api.desired_count
   min_capacity               = var.api.min_capacity
@@ -206,6 +234,12 @@ module "worker" {
   memory             = var.worker.memory
   cpu_architecture   = var.cpu_architecture
   container_port     = null # no ingress at all: it only polls SQS
+  management_port    = local.management_port
+
+  # No load balancer: the container health check (readiness on the management
+  # port, probed by the image's JVM-free script) is what lets ECS replace a stuck
+  # task and the circuit breaker roll back a release that never becomes ready.
+  container_health_check = { command = ["CMD", "/usr/local/bin/healthcheck"] }
 
   environment           = merge(local.common_environment, local.runtime_mode_environment.worker)
   task_role_policy_json = data.aws_iam_policy_document.worker_task.json
@@ -217,6 +251,11 @@ module "worker" {
     TICKETING_PAYMENT_APIKEY = { secret_arn = aws_secretsmanager_secret_version.payment_gateway_placeholder.secret_id, json_key = "apiKey" }
   }
   secrets_kms_key_arns = [module.kms.platform_key_arn]
+
+  # A release that poisons messages (DLQ) or stops consuming (oldest message age)
+  # is rolled back, like the API on 5xx / latency.
+  deployment_alarm_names    = module.observability.worker_deployment_alarm_names
+  deployment_alarms_enabled = var.deployment_alarm_rollback
 
   desired_count              = var.worker.desired_count
   min_capacity               = var.worker.min_capacity
@@ -252,6 +291,7 @@ module "observability" {
   queue_names             = module.sqs.queue_names
   dlq_names               = module.sqs.dlq_names
   dynamodb_table_names    = module.dynamodb.table_names
+  lambda_function_names   = { cognito-post-confirmation = module.auth.post_confirmation_function_name }
 
   monthly_budget_amount      = var.monthly_budget_usd
   budget_notification_emails = var.budget_notification_emails

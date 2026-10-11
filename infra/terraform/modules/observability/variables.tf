@@ -86,6 +86,12 @@ variable "dynamodb_table_names" {
   type        = map(string)
 }
 
+variable "lambda_function_names" {
+  description = "Map of logical name to Lambda function name that get an errors/throttles alarm (e.g. Cognito triggers)."
+  type        = map(string)
+  default     = {}
+}
+
 variable "queue_age_threshold_seconds" {
   description = "Alarm when the oldest message of a work queue is older than this (consumers stuck or under-provisioned)."
   type        = number

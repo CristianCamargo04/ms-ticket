@@ -3,11 +3,15 @@
 #   0. Amazon IP reputation list         (known bad actors / botnets)
 #   1. Anonymous IP list                  (scalper bots run from hosting providers;
 #                                          VPN/Tor users only counted by default)
-#   2. Rate limit per client IP           (volumetric abuse)
-#   3. Stricter rate limit on order POST  (bots / scalping on ticket drops)
-#   4. AWS Core rule set (OWASP top 10)
-#   5. Known bad inputs (Log4Shell, ...)
+#   2. Block /actuator                    (after URL decoding, path normalisation
+#                                          and lower-casing: no encoding bypass)
+#   3. Rate limit per client IP           (volumetric abuse)
+#   4. Stricter rate limit on order POST  (bots / scalping on ticket drops)
+#   5. AWS Core rule set (OWASP top 10)
+#   6. Known bad inputs (Log4Shell, ...)
 # Blocked rate-limited requests get a 429 in RFC 9457 shape, like the app.
+# Rate-based rules aggregate on the source IP of the connection to the ALB (not
+# on X-Forwarded-For), so a client cannot spoof its way around them.
 # The in-app per-customer limiter (Bucket4j) still applies behind the WAF.
 ################################################################################
 
@@ -92,9 +96,72 @@ resource "aws_wafv2_web_acl" "this" {
     }
   }
 
+  dynamic "custom_response_body" {
+    for_each = var.block_actuator_paths ? [1] : []
+
+    content {
+      key          = "not-found"
+      content_type = "APPLICATION_JSON"
+      content      = jsonencode({ type = "about:blank", title = "NOT_FOUND", status = 404 })
+    }
+  }
+
+  # The application serves actuator only on its management port, which the
+  # listener never forwards to; this rule is defence in depth against
+  # /%61ctuator, //actuator, /api/../actuator, /ACTUATOR and similar variants.
+  dynamic "rule" {
+    for_each = var.block_actuator_paths ? [1] : []
+
+    content {
+      name     = "block-actuator"
+      priority = 2
+
+      action {
+        block {
+          custom_response {
+            response_code            = 404
+            custom_response_body_key = "not-found"
+          }
+        }
+      }
+
+      statement {
+        byte_match_statement {
+          search_string         = "/actuator"
+          positional_constraint = "STARTS_WITH"
+
+          field_to_match {
+            uri_path {}
+          }
+
+          text_transformation {
+            priority = 0
+            type     = "URL_DECODE"
+          }
+
+          text_transformation {
+            priority = 1
+            type     = "NORMALIZE_PATH"
+          }
+
+          text_transformation {
+            priority = 2
+            type     = "LOWERCASE"
+          }
+        }
+      }
+
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        sampled_requests_enabled   = true
+        metric_name                = "${local.waf_metric_prefix}BlockActuator"
+      }
+    }
+  }
+
   rule {
     name     = "rate-limit-per-ip"
-    priority = 2
+    priority = 3
 
     action {
       block {
@@ -122,7 +189,7 @@ resource "aws_wafv2_web_acl" "this" {
 
   rule {
     name     = "rate-limit-order-placement"
-    priority = 3
+    priority = 4
 
     action {
       block {
@@ -192,7 +259,7 @@ resource "aws_wafv2_web_acl" "this" {
 
   rule {
     name     = "aws-common-rule-set"
-    priority = 4
+    priority = 5
 
     override_action {
       none {}
@@ -214,7 +281,7 @@ resource "aws_wafv2_web_acl" "this" {
 
   rule {
     name     = "aws-known-bad-inputs"
-    priority = 5
+    priority = 6
 
     override_action {
       none {}

@@ -27,6 +27,23 @@ locals {
     }
   ]
 
+  # Read-only root filesystem: the only writable paths are ephemeral, task-scoped
+  # volumes (Fargate has no tmpfs support). /tmp always; the image declares
+  # VOLUME /tmp with mode 1777 so that the non-root user can write to it. The
+  # ECS Exec SSM agent additionally needs /var/lib/amazon and /var/log/amazon,
+  # mounted only when ECS Exec is enabled.
+  writable_paths = merge(
+    { tmp = "/tmp" },
+    var.enable_execute_command ? { ssm-agent-state = "/var/lib/amazon", ssm-agent-logs = "/var/log/amazon" } : {},
+  )
+
+  # The application port takes client traffic; the management (actuator) port is
+  # only for health checks and in-VPC scrapers, never routed by the listener.
+  port_mappings = var.container_port == null ? [] : concat(
+    [{ name = "http", containerPort = var.container_port, hostPort = var.container_port, protocol = "tcp", appProtocol = "http" }],
+    var.management_port == null ? [] : [{ name = "management", containerPort = var.management_port, hostPort = var.management_port, protocol = "tcp", appProtocol = "http" }],
+  )
+
   container_definition = merge(
     {
       name                   = local.container_name
@@ -37,16 +54,8 @@ locals {
       stopTimeout            = var.stop_timeout
       environment            = local.environment
       secrets                = local.secrets
-      portMappings = var.container_port == null ? [] : [{
-        name          = "http"
-        containerPort = var.container_port
-        hostPort      = var.container_port
-        protocol      = "tcp"
-        appProtocol   = "http"
-      }]
-      # Read-only root filesystem: the only writable path is an ephemeral,
-      # task-scoped volume on /tmp (Fargate has no tmpfs support).
-      mountPoints = [{ sourceVolume = "tmp", containerPath = "/tmp", readOnly = false }]
+      portMappings           = local.port_mappings
+      mountPoints            = [for volume in sort(keys(local.writable_paths)) : { sourceVolume = volume, containerPath = local.writable_paths[volume], readOnly = false }]
       linuxParameters = {
         initProcessEnabled = true # reaps zombies, forwards SIGTERM, needed by ECS Exec
         capabilities       = { add = [], drop = ["ALL"] }
@@ -63,6 +72,18 @@ locals {
       }
     },
     var.container_user == null ? {} : { user = var.container_user },
+    # Container health check: an unhealthy task is replaced, and a deployment
+    # whose tasks never become healthy trips the circuit breaker (rollback).
+    # Essential for services without a load balancer (worker).
+    var.container_health_check == null ? {} : {
+      healthCheck = {
+        command     = var.container_health_check.command
+        interval    = var.container_health_check.interval
+        timeout     = var.container_health_check.timeout
+        retries     = var.container_health_check.retries
+        startPeriod = var.container_health_check.start_period
+      }
+    },
   )
 }
 
@@ -81,8 +102,12 @@ resource "aws_ecs_task_definition" "this" {
     cpu_architecture        = var.cpu_architecture
   }
 
-  volume {
-    name = "tmp"
+  dynamic "volume" {
+    for_each = sort(keys(local.writable_paths))
+
+    content {
+      name = volume.value
+    }
   }
 
   tags = merge(var.tags, { Name = local.full_name, Service = var.service_name })
@@ -105,6 +130,19 @@ resource "aws_vpc_security_group_ingress_rule" "app" {
   ip_protocol                  = "tcp"
   from_port                    = var.container_port
   to_port                      = var.container_port
+}
+
+# Load balancer health checks on the management port (no client traffic: the
+# listener only forwards to container_port).
+resource "aws_vpc_security_group_ingress_rule" "management" {
+  count = var.container_port == null || var.management_port == null ? 0 : length(var.ingress_security_group_ids)
+
+  security_group_id            = aws_security_group.this.id
+  description                  = "Management (actuator health) port from an allowed source security group"
+  referenced_security_group_id = var.ingress_security_group_ids[count.index]
+  ip_protocol                  = "tcp"
+  from_port                    = var.management_port
+  to_port                      = var.management_port
 }
 
 resource "aws_vpc_security_group_egress_rule" "https" {
@@ -164,13 +202,16 @@ resource "aws_ecs_service" "this" {
   }
 
   # ... and so is one that makes the given CloudWatch alarms fire (e.g. 5xx rate).
+  # deployment_alarms_enabled = false is a break-glass switch (the block stays,
+  # only monitoring/rollback are turned off) for shipping the fix of an incident
+  # whose guard alarms are already firing.
   dynamic "alarms" {
     for_each = length(var.deployment_alarm_names) > 0 ? [1] : []
 
     content {
       alarm_names = var.deployment_alarm_names
-      enable      = true
-      rollback    = true
+      enable      = var.deployment_alarms_enabled
+      rollback    = var.deployment_alarms_enabled
     }
   }
 
