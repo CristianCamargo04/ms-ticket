@@ -1,0 +1,17 @@
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+out/
+bin/
+*.class
+*.log
+.idea/
+*.iml
+.vscode/
+.DS_Store
+.env
+.claude/worktrees/
+infra/terraform/**/.terraform/
+infra/terraform/**/*.tfstate*
+infra/terraform/**/.terraform.lock.hcl.bak
+load-test/results/
