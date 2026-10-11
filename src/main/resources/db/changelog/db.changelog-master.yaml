@@ -1,0 +1,10 @@
+# Ordered list of DynamoDB migrations, applied by config.migration.DynamoMigrationRunner (local/ci only).
+# Rule: one new migration folder per schema change (db/migrations/<yyyyMMddHHmmss>_<TICKET>), never edit an applied
+# one (its SHA-256 checksum is verified). Each file mirrors the DynamoDB CreateTable API; TableName is a logical key
+# resolved to the configured physical name (aws.dynamodb.tables.*). In AWS, Terraform owns the same definitions.
+databaseChangeLog:
+  - migration: { id: 20261010100000_TCK-001, file: db/migrations/20261010100000_TCK-001/create-events-table.json }
+  - migration: { id: 20261010100100_TCK-002, file: db/migrations/20261010100100_TCK-002/create-tickets-table.json }
+  - migration: { id: 20261010100200_TCK-003, file: db/migrations/20261010100200_TCK-003/create-orders-table.json }
+  - migration: { id: 20261010100300_TCK-004, file: db/migrations/20261010100300_TCK-004/create-ticket-transitions-table.json }
+  - migration: { id: 20261010100400_TCK-005, file: db/migrations/20261010100400_TCK-005/create-distributed-locks-table.json }

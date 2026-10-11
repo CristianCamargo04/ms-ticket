@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ticketing:schema:payment-requested-message:1",
+  "title": "PaymentRequestedMessage",
+  "description": "Body of a message on the order-payment queue: asks the workers to charge an order whose tickets are PENDING_CONFIRMATION. Message attributes: messageType=PAYMENT_REQUESTED, correlationId, schemaVersion=1. The payment token is an opaque gateway token, never card data. Consumers are idempotent (at-least-once delivery).",
+  "type": "object",
+  "required": ["orderId", "paymentToken", "correlationId", "occurredAt"],
+  "properties": {
+    "orderId": {
+      "description": "Order identifier (also the payment gateway idempotency key).",
+      "type": "string",
+      "format": "uuid",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "paymentToken": {
+      "description": "Tokenized payment method.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,128}$"
+    },
+    "correlationId": {
+      "description": "Correlation id of the original HTTP request.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9-]{1,64}$"
+    },
+    "occurredAt": {
+      "description": "ISO-8601 instant at which the message was produced.",
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ticketing:schema:order-reservation-message:1",
+  "title": "OrderReservationMessage",
+  "description": "Body of a message on the order-reservation queue: asks the workers to reserve (or issue as complimentary) the tickets of a QUEUED order. Message attributes: messageType=ORDER_RESERVATION_REQUESTED, correlationId, schemaVersion=1. Consumers are idempotent (at-least-once delivery).",
+  "type": "object",
+  "required": ["orderId", "eventId", "correlationId", "occurredAt"],
+  "properties": {
+    "orderId": {
+      "description": "Order identifier (UUID v5 derived from the requester and the idempotency key).",
+      "type": "string",
+      "format": "uuid",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "eventId": {
+      "description": "Event identifier.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "correlationId": {
+      "description": "Correlation id of the original HTTP request.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9-]{1,64}$"
+    },
+    "occurredAt": {
+      "description": "ISO-8601 instant at which the message was produced.",
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

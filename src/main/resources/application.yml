@@ -1,0 +1,132 @@
+# Common configuration shared by every profile (local, dev, ci, prod).
+# No credentials anywhere: the AWS SDK uses DefaultCredentialsProvider (environment variables locally,
+# IAM task role in AWS) and JWTs are validated against the issuer's JWKS.
+
+spring:
+  application:
+    name: ms-ticket
+  main:
+    banner-mode: off
+  threads:
+    virtual:
+      # Only affects Spring-managed task executors (scheduling / residual blocking work), never the WebFlux
+      # request path (see ADR-009).
+      enabled: true
+  lifecycle:
+    # Graceful shutdown budget: in-flight HTTP requests and SQS messages are drained before stopping.
+    timeout-per-shutdown-phase: 30s
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI:http://localhost:8090/default}
+          jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8090/default/jwks}
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  info:
+    env:
+      enabled: true
+  tracing:
+    sampling:
+      probability: 1.0
+
+info:
+  application:
+    name: ${spring.application.name}
+
+logging:
+  level:
+    root: INFO
+    com.ticketing: INFO
+
+ticketing:
+  runtime-mode: all
+  orders:
+    hold-ttl: 10m
+    confirmation-timeout: 5m
+    republish-after: 30s
+    max-tickets-per-order: 10
+    # DynamoDB transactions allow 100 items and a command writes 2n + 2 of them.
+    max-complimentary-per-request: 40
+    candidate-factor: 3
+  events:
+    max-capacity: 20000
+    availability-stream-interval: 1s
+    ticket-write-concurrency: 4
+  cache:
+    event-ttl: 2s
+    event-max-size: 10000
+  sweeper:
+    interval: 15s
+    lease: 30s
+    batch-size: 100
+    concurrency: 8
+  retry:
+    inventory:
+      max-attempts: 6
+      min-backoff: 25ms
+      max-backoff: 1s
+      jitter: 0.5
+    publish:
+      max-attempts: 3
+      min-backoff: 100ms
+      max-backoff: 1s
+      jitter: 0.5
+  rate-limit:
+    enabled: true
+    capacity: 20
+    refill-tokens: 20
+    refill-period: 1s
+  messaging:
+    max-messages: 10
+    wait-time-seconds: 20
+    visibility-timeout-seconds: 60
+    concurrency: 16
+    pollers: 2
+  payment:
+    base-url: ${PAYMENT_GATEWAY_BASE_URL:http://localhost:8089}
+    connect-timeout: 1s
+    response-timeout: 3s
+  security:
+    audience: ${JWT_AUDIENCE:ms-ticket}
+    issuer: ${spring.security.oauth2.resourceserver.jwt.issuer-uri}
+    roles-claim: roles
+  migrations:
+    enabled: false
+
+aws:
+  region: ${AWS_REGION:us-east-1}
+  # Optional per-service endpoint overrides (DynamoDB Local / LocalStack); only set in the local and ci profiles:
+  # endpoint-override:
+  #   dynamodb-endpoint: http://localhost:8000
+  #   sqs-endpoint: http://localhost:4566
+  dynamodb:
+    tables:
+      events: ticketing-events
+      tickets: ticketing-tickets
+      orders: ticketing-orders
+      ticket-transitions: ticketing-ticket-transitions
+      distributed-locks: ticketing-distributed-locks
+      schema-migrations: ticketing-schema-migrations
+    deadline-shards: 8
+  sqs:
+    order-reservation-queue: ticketing-order-reservation
+    order-payment-queue: ticketing-order-payment

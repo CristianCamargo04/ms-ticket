@@ -1,0 +1,14 @@
+{
+  "TableName": "distributed-locks",
+  "AttributeDefinitions": [
+    { "AttributeName": "lockName", "AttributeType": "S" }
+  ],
+  "KeySchema": [
+    { "AttributeName": "lockName", "KeyType": "HASH" }
+  ],
+  "BillingMode": "PAY_PER_REQUEST",
+  "TimeToLiveSpecification": {
+    "AttributeName": "expiresAt",
+    "Enabled": true
+  }
+}

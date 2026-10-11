@@ -1,0 +1,12 @@
+{
+  "TableName": "ticket-transitions",
+  "AttributeDefinitions": [
+    { "AttributeName": "ticketKey", "AttributeType": "S" },
+    { "AttributeName": "transitionKey", "AttributeType": "S" }
+  ],
+  "KeySchema": [
+    { "AttributeName": "ticketKey", "KeyType": "HASH" },
+    { "AttributeName": "transitionKey", "KeyType": "RANGE" }
+  ],
+  "BillingMode": "PAY_PER_REQUEST"
+}

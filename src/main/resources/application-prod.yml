@@ -1,0 +1,65 @@
+# AWS production (ECS Fargate). Every environment-specific value comes from environment variables injected by the
+# task definition; values without a default are mandatory (startup fails fast when they are missing).
+# Credentials come from the IAM task role; secrets, if any, from Secrets Manager. Migrations are owned by Terraform.
+
+management:
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+
+logging:
+  structured:
+    format:
+      console: ecs
+  level:
+    root: ${LOG_LEVEL_ROOT:INFO}
+    com.ticketing: ${LOG_LEVEL_APP:INFO}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI}
+          jwk-set-uri: ${JWT_JWK_SET_URI}
+
+ticketing:
+  runtime-mode: ${TICKETING_RUNTIME_MODE}
+  orders:
+    hold-ttl: ${TICKETING_HOLD_TTL:10m}
+    confirmation-timeout: ${TICKETING_CONFIRMATION_TIMEOUT:5m}
+    max-tickets-per-order: ${TICKETING_MAX_TICKETS_PER_ORDER:10}
+  events:
+    max-capacity: ${TICKETING_MAX_CAPACITY:20000}
+  rate-limit:
+    enabled: ${TICKETING_RATE_LIMIT_ENABLED:true}
+    capacity: ${TICKETING_RATE_LIMIT_CAPACITY:20}
+    refill-tokens: ${TICKETING_RATE_LIMIT_REFILL_TOKENS:20}
+  messaging:
+    concurrency: ${TICKETING_MESSAGING_CONCURRENCY:16}
+    pollers: ${TICKETING_MESSAGING_POLLERS:2}
+  payment:
+    base-url: ${PAYMENT_GATEWAY_BASE_URL}
+  security:
+    audience: ${JWT_AUDIENCE}
+    issuer: ${JWT_ISSUER_URI}
+  migrations:
+    enabled: false
+
+aws:
+  region: ${AWS_REGION}
+  dynamodb:
+    tables:
+      events: ${DYNAMODB_TABLE_EVENTS}
+      tickets: ${DYNAMODB_TABLE_TICKETS}
+      orders: ${DYNAMODB_TABLE_ORDERS}
+      ticket-transitions: ${DYNAMODB_TABLE_TICKET_TRANSITIONS}
+      distributed-locks: ${DYNAMODB_TABLE_DISTRIBUTED_LOCKS}
+      schema-migrations: ${DYNAMODB_TABLE_SCHEMA_MIGRATIONS:ticketing-prod-schema-migrations}
+    deadline-shards: ${DYNAMODB_DEADLINE_SHARDS:8}
+  sqs:
+    order-reservation-queue: ${SQS_ORDER_RESERVATION_QUEUE}
+    order-payment-queue: ${SQS_ORDER_PAYMENT_QUEUE}

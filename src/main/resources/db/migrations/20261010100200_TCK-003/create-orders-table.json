@@ -1,0 +1,22 @@
+{
+  "TableName": "orders",
+  "AttributeDefinitions": [
+    { "AttributeName": "orderId", "AttributeType": "S" },
+    { "AttributeName": "deadlinePartition", "AttributeType": "S" },
+    { "AttributeName": "deadlineAt", "AttributeType": "N" }
+  ],
+  "KeySchema": [
+    { "AttributeName": "orderId", "KeyType": "HASH" }
+  ],
+  "GlobalSecondaryIndexes": [
+    {
+      "IndexName": "deadline-index",
+      "KeySchema": [
+        { "AttributeName": "deadlinePartition", "KeyType": "HASH" },
+        { "AttributeName": "deadlineAt", "KeyType": "RANGE" }
+      ],
+      "Projection": { "ProjectionType": "ALL" }
+    }
+  ],
+  "BillingMode": "PAY_PER_REQUEST"
+}

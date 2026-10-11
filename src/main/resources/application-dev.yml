@@ -1,0 +1,45 @@
+# AWS dev environment (ECS Fargate). Infrastructure (tables, queues) is owned by Terraform: migrations are disabled.
+# Credentials come from the IAM task role; endpoints are the regional AWS endpoints (no override).
+
+management:
+  tracing:
+    sampling:
+      probability: 0.5
+
+logging:
+  structured:
+    format:
+      console: ecs
+
+ticketing:
+  runtime-mode: ${TICKETING_RUNTIME_MODE:all}
+  payment:
+    base-url: ${PAYMENT_GATEWAY_BASE_URL}
+  security:
+    audience: ${JWT_AUDIENCE:ms-ticket}
+    issuer: ${JWT_ISSUER_URI}
+  migrations:
+    enabled: false
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI}
+          jwk-set-uri: ${JWT_JWK_SET_URI}
+
+aws:
+  region: ${AWS_REGION:us-east-1}
+  dynamodb:
+    tables:
+      events: ${DYNAMODB_TABLE_EVENTS:ticketing-dev-events}
+      tickets: ${DYNAMODB_TABLE_TICKETS:ticketing-dev-tickets}
+      orders: ${DYNAMODB_TABLE_ORDERS:ticketing-dev-orders}
+      ticket-transitions: ${DYNAMODB_TABLE_TICKET_TRANSITIONS:ticketing-dev-ticket-transitions}
+      distributed-locks: ${DYNAMODB_TABLE_DISTRIBUTED_LOCKS:ticketing-dev-distributed-locks}
+      schema-migrations: ${DYNAMODB_TABLE_SCHEMA_MIGRATIONS:ticketing-dev-schema-migrations}
+    deadline-shards: ${DYNAMODB_DEADLINE_SHARDS:8}
+  sqs:
+    order-reservation-queue: ${SQS_ORDER_RESERVATION_QUEUE:ticketing-dev-order-reservation}
+    order-payment-queue: ${SQS_ORDER_PAYMENT_QUEUE:ticketing-dev-order-payment}
