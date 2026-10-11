@@ -30,7 +30,7 @@ public interface ComplimentaryRestController {
     @PostMapping
     Mono<ResponseEntity<OrderAcceptedResponseDto>> issueComplimentary(
             @PathVariable("eventId") String eventId,
-            @RequestHeader(OrderRestController.IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
+            @RequestHeader(name = OrderRestController.IDEMPOTENCY_KEY_HEADER, required = false) String idempotencyKey,
             @Valid @RequestBody IssueComplimentaryRequestDto request,
             ServerHttpRequest httpRequest);
 }

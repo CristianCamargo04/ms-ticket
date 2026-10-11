@@ -393,7 +393,7 @@ All timestamps are stored as **Number (epoch milliseconds)** so range conditions
 | Table | Keys | Attributes | Indexes |
 |---|---|---|---|
 | events | PK `eventId` S | `name` S, `venue` S, `eventDate` N, `totalCapacity` N, `ticketPrice` S, `currency` S, `status` S, `availableCount` N, `reservedCount` N, `pendingCount` N, `soldCount` N, `complimentaryCount` N, `version` N, `createdAt` N, `updatedAt` N | GSI `status-eventDate-index` (PK `status` S, SK `eventDate` N, ALL) |
-| tickets | PK `eventId` S, SK `ticketId` S | `status` S, `orderId` S?, `holdExpiresAt` N?, `statusKey` S (`<STATUS>#<ticketId>`), `version` N, `updatedAt` N | GSI `eventId-statusKey-index` (PK `eventId`, SK `statusKey`, KEYS_ONLY) |
+| tickets | PK `eventId` S, SK `ticketId` S | `status` S, `orderId` S?, `holdExpiresAt` N?, `statusKey` S (`<STATUS>#<ticketId>`), `version` N, `updatedAt` N | GSI `eventId-statusKey-index` (PK `eventId`, SK `statusKey`, INCLUDE `status`, `version`, `updatedAt` — enough to build `TicketData` for AVAILABLE tickets without a second read) |
 | orders | PK `orderId` S | `eventId`, `customerId`, `orderType`, `quantity` N, `ticketIds` L<S>, `ticketStatus`, `processingStatus`, `reason`?, `requestHash`, `holdExpiresAt` N?, `paymentReference`?, `version` N, `createdAt` N, `updatedAt` N, **`deadlinePartition` S?** (`<DeadlineTypeEnum>#<shard>`), **`deadlineAt` N?** | GSI `deadline-index` (PK `deadlinePartition`, SK `deadlineAt`, ALL) — sparse |
 | ticket-transitions | PK `ticketKey` S (`<eventId>#<ticketId>`), SK `transitionKey` S (`<epochMillis 13-digit zero-padded>#<transitionId>`) | `eventId`, `ticketId`, `orderId`, `fromStatus`, `toStatus`, `reason`, `actor`, `occurredAt` N | — |
 | distributed-locks | PK `lockName` S | `owner` S, `leaseUntil` N, `expiresAt` N (epoch **seconds**, DynamoDB TTL) | — |
@@ -518,3 +518,25 @@ message/PaymentRequestedMessageRequestDto(String orderId, String paymentToken, S
 - Concurrency: `business.usecase.impl.inventory.ReserveTicketsUseCaseImplConcurrencyTest` uses an in-memory fake `InventoryTransactionPersistence`/`TicketPersistence`/`OrderPersistence` with atomic compare-and-set semantics and fires ≥1000 concurrent reservations at capacity 100 → exactly 100 tickets reserved, never a ticket in two orders, counters consistent. Plus races: confirm vs expiry, duplicate SQS delivery, same Idempotency-Key in parallel.
 - Integration tests (`src/integrationTest/java`, suffix `IT`): Testcontainers `GenericContainer("amazon/dynamodb-local:latest")` and `LocalStackContainer(DockerImageName.parse("localstack/localstack:4.9"))` with SQS.
 - Name test methods descriptively (`shouldRejectOrderWhenEventIsSoldOut`). No `Thread.sleep` in tests.
+
+---
+
+## 11. Clarifications after wave 1 (authoritative)
+
+1. **Retry helper**: call `ReactiveRetryUtil.backoff(p.maxAttempts(), p.minBackoff(), p.maxBackoff(), p.jitter(), TicketingException::isRetryable)` (util cannot see `RetryPolicy`; `maxAttempts` counts *retries*). On exhaustion the last original error is propagated (not `RetryExhaustedException`).
+2. **Two `RetryPolicy` beans** (`inventoryRetryPolicy`, `publishRetryPolicy`) are resolved **by constructor parameter name** (the build uses `-parameters`; business must not import `@Qualifier`). Name the parameters exactly like that.
+3. **Ids**: `DeterministicIdUtil.nameBasedId(String)` returns the String UUID v5 used as `orderId`.
+4. **Layer settings records** (created once, consumed by the layer, instantiated in `config`):
+   - `persistence.impl.support.DynamoDbTableNames(events, tickets, orders, ticketTransitions, distributedLocks, int deadlineShards)`
+   - `client.sdk.impl.SqsQueueNames(orderReservationQueue, orderPaymentQueue)`
+   - `client.rest.impl.PaymentGatewaySettings(Duration callTimeout, int maxRetries, Duration retryBackoff)` (from `ticketing.payment.call-timeout|max-retries|retry-backoff`); the `WebClient` (base URL, connect/response timeouts) is a bean built in `config.client.PaymentGatewayClientConfig` and injected into the client impl.
+   - `cache.impl.EventCacheSettings(Duration ttl, long maxSize)`
+5. **Tickets GSI** `eventId-statusKey-index` projects `INCLUDE [status, version, updatedAt]`, so `findAvailable` builds full `TicketData` (orderId/holdExpiresAt are null for AVAILABLE tickets).
+6. **Queue names** default to `ticketing-order-reservation` and `ticketing-order-payment` (DLQs: `ticketing-order-reservation-dlq`, `ticketing-order-payment-dlq`).
+7. **`schema-migrations`** table is created by `DynamoMigrationRunner` itself (not a migration file); migration `TableName`s are kebab-case logical keys mapped to `AwsProperties.Tables` (`ticket-transitions` → `ticketTransitions`, `distributed-locks` → `distributedLocks`); `TimeToLiveSpecification` is applied with `UpdateTimeToLive` after `CreateTable`.
+8. **Correlation id** constants: `RequestContext.CORRELATION_ID_HEADER = "X-Correlation-Id"`, `RequestContext.CORRELATION_ID_KEY = "correlationId"` (config may reference presentation).
+9. **Idempotency-Key** header is declared `required = false` so a missing header reaches `IdempotencyKeyResolver` and yields `400 INVALID_IDEMPOTENCY_KEY`.
+10. `domain.validation.DomainPreconditions` is a pure helper for record invariants; invariant violations inside domain records/commands throw `IllegalArgumentException`/`NullPointerException` (programming errors → 500), while client input is validated by DTOs and use cases (→ 400).
+11. `RandomGenerator` bean delegates to `ThreadLocalRandom.current()` (thread-safe).
+12. Mapper packages contain only `*Mapper` classes; helpers go to a `support` package. `persistence.entity` contains only `*Entity` classes (converters go elsewhere, e.g. `persistence.impl.support`).
+13. Every non-exempt top-level production class needs `<SimpleName>Test` in the same test package (TestMirrorRulesTest), including settings records, listeners, filters and runners in `config`.

@@ -37,7 +37,7 @@ public interface OrderRestController {
     @PostMapping("/events/{eventId}/orders")
     Mono<ResponseEntity<OrderAcceptedResponseDto>> placeOrder(
             @PathVariable("eventId") String eventId,
-            @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
+            @RequestHeader(name = IDEMPOTENCY_KEY_HEADER, required = false) String idempotencyKey,
             @Valid @RequestBody PlaceOrderRequestDto request,
             ServerHttpRequest httpRequest);
 
@@ -63,7 +63,7 @@ public interface OrderRestController {
     @PostMapping("/orders/{orderId}/confirmation")
     Mono<ResponseEntity<OrderStatusResponseDto>> confirmOrder(
             @PathVariable("orderId") String orderId,
-            @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
+            @RequestHeader(name = IDEMPOTENCY_KEY_HEADER, required = false) String idempotencyKey,
             @Valid @RequestBody ConfirmOrderRequestDto request,
             ServerHttpRequest httpRequest);
 

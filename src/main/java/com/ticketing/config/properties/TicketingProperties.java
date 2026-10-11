@@ -173,11 +173,17 @@ public record TicketingProperties(
      * @param baseUrl         gateway base URL (required, no default)
      * @param connectTimeout  TCP connect timeout
      * @param responseTimeout response timeout of a call
+     * @param callTimeout     overall timeout of a single call (connect + response + body)
+     * @param maxRetries      retries on 5xx responses and timeouts (0 disables retries)
+     * @param retryBackoff    first backoff between retries
      */
     public record Payment(
             String baseUrl,
             @DefaultValue("1s") Duration connectTimeout,
-            @DefaultValue("3s") Duration responseTimeout) {
+            @DefaultValue("3s") Duration responseTimeout,
+            @DefaultValue("4s") Duration callTimeout,
+            @DefaultValue("2") int maxRetries,
+            @DefaultValue("100ms") Duration retryBackoff) {
     }
 
     /**

@@ -72,7 +72,7 @@ class MigrationResourcesTest {
                 Arguments.of("db/migrations/20261010100000_TCK-001/create-events-table.json", "events",
                         List.of("eventId"), "status-eventDate-index", "ALL"),
                 Arguments.of("db/migrations/20261010100100_TCK-002/create-tickets-table.json", "tickets",
-                        List.of("eventId", "ticketId"), "eventId-statusKey-index", "KEYS_ONLY"),
+                        List.of("eventId", "ticketId"), "eventId-statusKey-index", "INCLUDE"),
                 Arguments.of("db/migrations/20261010100200_TCK-003/create-orders-table.json", "orders",
                         List.of("orderId"), "deadline-index", "ALL"),
                 Arguments.of("db/migrations/20261010100300_TCK-004/create-ticket-transitions-table.json",

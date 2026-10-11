@@ -23,6 +23,12 @@ public record RequestContext(String subject, Set<String> roles, String correlati
     /** Customer role name. */
     public static final String ROLE_CUSTOMER = "CUSTOMER";
 
+    /** HTTP header carrying the correlation id (set or echoed by {@code CorrelationIdWebFilter}). */
+    public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
+
+    /** Exchange attribute and Reactor context key holding the correlation id. */
+    public static final String CORRELATION_ID_KEY = "correlationId";
+
     private static final String AUTHORITY_PREFIX = "ROLE_";
 
     /**

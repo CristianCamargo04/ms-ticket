@@ -105,6 +105,9 @@ ticketing:
     base-url: ${PAYMENT_GATEWAY_BASE_URL:http://localhost:8089}
     connect-timeout: 1s
     response-timeout: 3s
+    call-timeout: 4s
+    max-retries: 2
+    retry-backoff: 100ms
   security:
     audience: ${JWT_AUDIENCE:ms-ticket}
     issuer: ${spring.security.oauth2.resourceserver.jwt.issuer-uri}
