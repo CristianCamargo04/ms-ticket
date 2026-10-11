@@ -1,0 +1,17 @@
+# Local Terraform artifacts (the provider lock files ARE committed).
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/crash.log
+**/crash.*.log
+
+# Real backend settings and local overrides stay on the operator's machine.
+**/backend.hcl
+**/override.tf
+**/override.tf.json
+**/*_override.tf
+**/*_override.tf.json
+
+# Lambda packages built by archive_file during plan.
+**/.build/
