@@ -540,3 +540,181 @@ message/PaymentRequestedMessageRequestDto(String orderId, String paymentToken, S
 11. `RandomGenerator` bean delegates to `ThreadLocalRandom.current()` (thread-safe).
 12. Mapper packages contain only `*Mapper` classes; helpers go to a `support` package. `persistence.entity` contains only `*Entity` classes (converters go elsewhere, e.g. `persistence.impl.support`).
 13. Every non-exempt top-level production class needs `<SimpleName>Test` in the same test package (TestMirrorRulesTest), including settings records, listeners, filters and runners in `config`.
+
+---
+
+## 12. As-built deviations (authoritative over sections 0–11)
+
+This section consolidates every place where the delivered code differs from, or refines, sections 0–11. It was
+written after all layers were merged and **checked against the code**: where a layer author's review note was later
+superseded by a fix, the final behaviour is described (marked *superseded*). Sections 0–11 are kept unchanged as the
+original contract; when they disagree with this section, this section wins.
+
+### 12.1 Contracts and domain (wave 1)
+
+1. `domain.inventory.InventoryCommand` is a **sealed interface** permitting the five commands
+   (`Reserve`, `IssueComplimentary`, `Confirm`, `FinalizeSale`, `ReleaseInventoryCommand`). It exposes `order()`,
+   `ticketIds()`, `reason()`, `now()`, `actor()` and derives `fromStatus()`/`toStatus()` from the reason through
+   `TicketStateMachine.sourceOf/targetOf`; `quantity()` = `ticketIds().size()`.
+   `InventoryCommand.MAX_TICKETS_PER_TRANSACTION = 49` (a transaction writes `2n + 2 ≤ 100` items); `OrderPolicy`
+   rejects `maxTicketsPerOrder`/`maxComplimentaryPerRequest` above it.
+2. `domain.validation.DomainPreconditions` centralises record invariants (`IllegalArgumentException` /
+   `NullPointerException` → programming errors, 500).
+3. The `RandomGenerator` bean delegates to `ThreadLocalRandom.current()` (thread-safe).
+4. `TicketingException.isRetryable(Throwable)` is the static retry filter; `ReactiveRetryUtil.backoff` takes
+   primitives (`maxAttempts` = number of **retries**, min/max backoff, jitter, predicate) and propagates the last
+   original error on exhaustion.
+5. Tickets GSI `eventId-statusKey-index` projects `INCLUDE [status, version, updatedAt]`; queue names default to
+   `ticketing-order-reservation` / `ticketing-order-payment` (DLQs `<queue>-dlq`).
+
+### 12.2 Persistence
+
+1. **`ClientRequestToken`** = first 36 hex chars of
+   `sha256(operation | orderId | sortedTicketIds | nowEpochMillis)`; release operations are named
+   `release-<REASON>`. Including the command instant makes a business-level retry (a new command with a new `now`)
+   use a new token, avoiding `IdempotentParameterMismatchException`, while SDK retries of one command stay
+   idempotent.
+2. Event updates of `confirm`, `finalizeSale` and `release` carry `attribute_exists(eventId)`; every event, ticket and
+   order update inside a transaction also does `SET updatedAt = :now ADD version :one`.
+3. Every ticket transition rewrites `statusKey` (`<TO_STATUS>#<ticketId>`); `finalizeSale` also removes the ticket's
+   `holdExpiresAt`; `release` removes `orderId` and `holdExpiresAt`.
+4. Audit records use a **deterministic `transitionId`** = UUID v5 of `token + "#" + ticketId`; a `ConditionalCheckFailed`
+   on an audit item alone (no order/event/ticket condition failed) is treated as a retryable
+   `InventoryConflictException`.
+5. Cancellation reasons are mapped by index with the priority of §6.3; `TransactionConflict`, throttling,
+   `ProvisionedThroughputExceeded`, `RequestLimitExceeded`, `InternalServerError` or an empty reason list →
+   `InventoryConflictException`. Outside cancellations, `TransactionInProgress`, throttling, 5xx, API call (attempt)
+   timeouts and client I/O failures are transient; validation errors, `IdempotentParameterMismatchException`,
+   credential/marshalling errors and `NonRetryableException` propagate unchanged.
+6. `transitionProcessingStatus` with a `null` reason **removes** `reason`; a terminal target removes
+   `deadlinePartition`/`deadlineAt`.
+7. `findDueOrders` queries every shard (each limited to `limit`), merges, sorts by `deadlineAt` (then `orderId`) and
+   returns **at most `limit` in total**.
+8. `TicketPersistence.saveAll` retries `UnprocessedItems` up to **8 attempts, 50 ms..2 s** (`BatchRetryPolicy`), then
+   fails with `InventoryConflictException`; `findByIds` uses a **consistent** `BatchGetItem` (100 keys per call,
+   unprocessed keys retried) and returns the distinct tickets in request order.
+9. Migrations: `TableDefinitionParser` accepts only a strict `CreateTable` subset and only `PAY_PER_REQUEST`;
+   checksums are SHA-256 of the file content with line endings normalised to LF (a CRLF checkout does not look
+   modified); `schema-migrations` is created by the runner itself.
+10. `EventPersistence.findByStatus` rejects a cursor that belongs to another status with
+    `DomainValidationException` (400).
+
+### 12.3 Business
+
+1. **ConfirmOrder**: an order `EXPIRED` with reason `HOLD_EXPIRED` answers `410 HOLD_EXPIRED` (not 409), both on the
+   first read and after reloading a lost race, so the answer does not depend on whether the sweeper already ran.
+   An order already `PENDING_CONFIRMATION` republishes its payment message **only before** its confirmation
+   deadline (afterwards the reconciliation sweeper owns it). No local retry: a transient conflict surfaces as
+   `503 INVENTORY_CONFLICT` with `Retry-After: 1`.
+2. **CancelOrder** re-evaluates the reloaded order up to **2 times** when its conditional write loses a race, then
+   fails with `InventoryConflictException` (503).
+3. **ProcessOrderPayment**: does **not** start a charge once `deadlineAt <= now` (acknowledges; the reconciliation
+   sweeper settles the order); `PaymentOutcome.NotFound` from `charge` → retryable `PaymentGatewayException`; the
+   finalize/release write after the gateway answered is retried locally with `inventoryRetryPolicy` (the money is
+   already captured). The charge idempotency key and the order id are the same value.
+4. **CreateEvent** writes the tickets in `ticketWriteConcurrency` **contiguous slices** in parallel and only moves
+   `PUBLISHING → ON_SALE` when the written count equals the capacity (otherwise the event stays `PUBLISHING`).
+5. **StreamEventAvailability**: one **shared poll per event** (`Flux.interval` → `onBackpressureDrop` →
+   `concatMap(getAvailability, 1)` → `replay(1).refCount(1)`, unregistered on termination/cancel); each subscriber
+   applies `onBackpressureLatest` and `distinctUntilChanged(sameCountsAs)`.
+6. **Sweepers** (`LeasedSweep` + `SweepItemOutcome`): `OrderStateChanged` counts as neither released nor failed
+   (`UNCHANGED`); per-order errors become `failed`; lease-release errors are swallowed (the lease expires);
+   lock-acquisition and due-order query errors propagate (the scheduler controller converts them to
+   `SweepResult.skipped()`).
+7. **RepublishStaleOrders**: no in-run retry (the next run is the retry); republished messages use
+   `correlationId = orderId`; an order still `QUEUED` **20 × `republishAfter`** (10 min) after its creation is moved to
+   `FAILED` with reason `DISPATCH_EXHAUSTED` (counted as failed, logged at ERROR).
+8. **ReserveTickets** filters candidates whose `status` is not `AVAILABLE`, deduplicates them and returns a uniform
+   random sample (partial Fisher–Yates) **sorted** by ticket id.
+9. **PlaceOrder / IssueComplimentary** share `QueuedOrderAdmission`; a replay must match the fingerprint **and** the
+   event, owner, type and quantity of the existing order, otherwise `422`.
+10. **ListEvents** with a `null` status → `DomainValidationException` (400).
+
+### 12.4 Client and cache
+
+1. Circuit breaker bean `paymentGatewayCircuitBreaker` (instance `paymentGateway`): count-based window 20,
+   `minimumNumberOfCalls` 20, failure rate 50 %, 30 s open, 5 half-open calls; it records **only transient
+   failures** (5xx, timeouts, I/O) — a 4xx proves the gateway is up. State transitions are logged at WARN.
+2. The payment `WebClient` has a **dedicated Reactor Netty pool** (`payment-gateway`, 100 connections, pending
+   acquire = connect timeout, idle 20 s, background eviction 30 s) and validates `ticketing.payment.base-url` at
+   startup. Per call: `timeout(callTimeout = 4 s)` → retry only transient failures (**429 is not retried**), backoff
+   from `retryBackoff` capped at 10× with jitter 0.5 → circuit breaker → `PaymentGatewayException`. A blank
+   idempotency key is rejected before any request; an unknown charge status → `PaymentGatewayException`.
+3. AWS SDK clients: `RetryMode.STANDARD`, Netty connect timeout 2 s, acquisition timeout 5 s; DynamoDB 3 s per
+   attempt / 10 s per call (200 connections); SQS 25 s / 60 s (100 connections); publications override per request
+   with **2 s / 5 s**.
+4. SQS publisher: attributes `messageType` (String), `correlationId` (String) and `schemaVersion` as **Number**
+   (`1`). *Superseded*: the correlation attribute is never omitted — a blank or schema-invalid correlation id is
+   replaced by a new random UUID in both the body and the attribute.
+5. Event cache: Caffeine `AsyncCache` sharing in-flight loads (no stampede), never caching empty results or errors,
+   and running the shared load with the Reactor context of the triggering caller. `evict` is not called by any use
+   case (the 2 s TTL bounds staleness).
+6. Integration tests use `org.testcontainers.localstack.LocalStackContainer` (Testcontainers 2.x).
+
+### 12.5 Presentation and web
+
+1. Helpers: `presentation.impl.error.ProblemDetailFactory` (shared by the advice, the security handler and the rate
+   limiter), `presentation.impl.support.JsonMessageReader` (`MalformedMessageException extends
+   IllegalArgumentException`; tolerant reader; never echoes the payload), `presentation.impl.support.ResourceIdValidator`
+   (path ids `^[A-Za-z0-9-]{1,64}$` → 400), `config.security.ThrottledJwkSource`, `config.security.SecurityProblemHandler`,
+   `config.web.ProblemDetailResponseWriter`.
+2. Framework errors (404 unknown route, 405, 406, 413 body too large, 415) are rendered as `ProblemDetail` **without
+   `errorCode`** (400/401/403/429/500 map to their `ErrorCodeEnum`).
+3. Retryable business errors (503) carry `Retry-After: 1`; accepted rate-limited calls carry
+   `X-RateLimit-Remaining`; the limiter keeps at most **100 000** callers (Caffeine, expire-after-access = time to full
+   refill) and runs at order −90, right after Spring Security.
+4. Security headers add a CSP `default-src 'none'; frame-ancestors 'none'` and `Referrer-Policy: no-referrer`; HSTS is
+   written by a custom writer on HTTPS requests **or** `X-Forwarded-Proto: https`. The JWK set is downloaded with
+   1 s / 2 s timeouts and re-downloaded for unknown key ids at most every 30 s.
+5. JWTs must also carry a **non-blank `sub`**. An unauthenticated call that reaches a controller →
+   `AuthenticationCredentialsNotFoundException` → 401. Roles accept a JSON array or a space/comma separated string.
+6. The request fingerprint escapes `|` and `\` inside field values.
+7. `POST /orders/{orderId}/confirmation` validates `Idempotency-Key` but does not forward it (confirmation is
+   idempotent by order state; the gateway key is the order id). `POST /events/{eventId}/complimentary-tickets`
+   returns `Location: /api/v1/orders/{orderId}`.
+8. SSE (`AvailabilityRestControllerImpl`): one shared upstream per event (`replay(1).refCount()`), a comment-only
+   `keepalive` frame every **15 s**, maximum connection lifetime **30 min**, SSE `id` = capture instant in epoch ms.
+9. The client IP is the **first** `X-Forwarded-For` hop (informational; fallback rate-limit key of unauthenticated
+   callers only).
+
+### 12.6 Messaging and scheduling (`config`)
+
+1. `waitTimeSeconds` accepts **0..20** (*superseded* 1..20): with short polling (0) a poller pauses 1 s after an
+   empty receive.
+2. Redelivery backoff `min(2^receiveCount × 5 s, 300 s)` and SQS-call retry backoff `1 s..30 s` are constants of
+   `SqsListenerSettings`; a handler is cancelled after **90 % of the visibility timeout** (54 s) and the message is
+   rejected; pollers are merged with prefetch 1 (received-but-not-started messages ≤ `pollers × maxMessages`).
+3. Poison detection reads `maxReceiveCount` from the queue's `RedrivePolicy` once at startup and only classifies the
+   last allowed delivery as `poison` (ERROR log, metric outcome). *Superseded*: that delivery gets **the same
+   backoff** (not visibility 0), so a stale redrive policy can never cause a hot loop.
+4. Outcome `failed` also when `DeleteMessage` still fails after 2 retries (200 ms backoff).
+5. Metrics: `sqs.messages{queue,outcome}`, `sqs.message.processing{queue,outcome}`, `sqs.messages.in.flight{queue}`,
+   `sweeper.results{type,outcome}`, `sweeper.orders{type,result}`; common tags `application`, `runtime_mode`.
+6. The Reactor context of a handler carries `correlationId`, `sqsMessageId` and `sqsReceiveCount`; a missing or
+   invalid `correlationId` attribute is replaced by the SQS message id. The `correlationId` context key is bridged to
+   the MDC (`ObservabilityConfig`, automatic context propagation).
+7. Lifecycle: `SqsListenerContainer.stop(Runnable)` is asynchronous; the drain budget is **90 % of
+   `spring.lifecycle.timeout-per-shutdown-phase`** (30 s → 27 s), after which remaining handlers are cancelled. The
+   container runs in the web server's graceful-shutdown phase (`WebServerApplicationContext.GRACEFUL_SHUTDOWN_PHASE`).
+   *Superseded*: `DEFAULT_PHASE - 512` is the phase of the `MaintenanceTimer`, not of the container.
+8. `MaintenanceTimer` (replaces the `Flux.interval` timer of `SchedulingConfig` in §8): `Flux.interval(interval)` →
+   `onBackpressureDrop` → `concatMap(runSweeps, 0)`; overlapping ticks are dropped and **each sweep is bounded by the
+   lease duration** (`ticketing.sweeper.lease`); both sweeps run sequentially; errors are logged/counted and never
+   stop the timer. Both the container and the timer are guarded by `WorkerModeCondition`.
+
+### 12.7 Infrastructure and local environment
+
+1. LocalStack is pinned to `localstack/localstack:4.9` (compose and Testcontainers); compose pins
+   `amazon/dynamodb-local:3.3.1`, while the integration tests still use `amazon/dynamodb-local:latest`.
+2. `.env` uses `LOCAL_AWS_*` names (injected as `AWS_*` only inside the containers) so a developer's exported
+   credentials can never be forwarded.
+3. Locally the API validates `iss = http://localhost:8090/default` but downloads the JWKS from
+   `http://auth-mock:8080/default/jwks` (hence `jwk-set-uri` + explicit issuer validator, no issuer discovery).
+4. Terraform injects `MANAGEMENT_SERVER_PORT=8081` (actuator off the public listener), the Cognito groups claim as
+   roles (`TICKETING_SECURITY_ROLESCLAIM=cognito:groups`) and the app client id as audience. Known gaps, tracked in
+   `docs/limitations-and-improvements.md` §10: the application validates only `aud` (Cognito access tokens carry
+   `client_id`), does not read `TICKETING_PAYMENT_APIKEY`, takes the first `X-Forwarded-For` hop, does not propagate
+   `traceparent` through SQS, and the `payment-captured-for-released-order` log metric filter is lower case while the
+   log line starts with an upper-case `P`.
+5. `RuntimeModeEnum.apiEnabled()` is not consulted: a `worker` instance still registers the REST controllers (not
+   reachable: no published port locally, no ingress in AWS).
