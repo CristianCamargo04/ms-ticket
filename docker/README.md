@@ -237,8 +237,8 @@ binding:
 | `TICKETING_RUNTIMEMODE` (and `TICKETING_RUNTIME_MODE`) | `API` / `WORKER` | `ticketing.runtime-mode` |
 | `TICKETING_MIGRATIONS_ENABLED` | `true` (API) / `false` (worker) | `ticketing.migrations.enabled` |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | from `.env` (`LOCAL_AWS_*`) | `aws.region`, `DefaultCredentialsProvider` |
-| `AWS_DYNAMODBENDPOINT` / `AWS_ENDPOINT_URL_DYNAMODB` | `http://dynamodb-local:8000` | `aws.dynamodb-endpoint` / SDK-native |
-| `AWS_SQSENDPOINT` / `AWS_ENDPOINT_URL_SQS` | `http://localstack:4566` | `aws.sqs-endpoint` / SDK-native |
+| `AWS_ENDPOINTOVERRIDE_DYNAMODBENDPOINT` / `AWS_ENDPOINT_URL_DYNAMODB` | `http://dynamodb-local:8000` | `aws.endpoint-override.dynamodb-endpoint` / SDK-native |
+| `AWS_ENDPOINTOVERRIDE_SQSENDPOINT` / `AWS_ENDPOINT_URL_SQS` | `http://localstack:4566` | `aws.endpoint-override.sqs-endpoint` / SDK-native |
 | `AWS_SQS_ORDERRESERVATIONQUEUE` | `ticketing-order-reservation` | `aws.sqs.order-reservation-queue` |
 | `AWS_SQS_ORDERPAYMENTQUEUE` | `ticketing-order-payment` | `aws.sqs.order-payment-queue` |
 | `TICKETING_SECURITY_ISSUER` | `http://localhost:8090/default` | `ticketing.security.issuer` |

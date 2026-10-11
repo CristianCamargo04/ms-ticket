@@ -32,14 +32,15 @@ x-emulator-credentials: &emulator-credentials
 
 # Environment shared by ticketing-api and ticketing-worker. Keys follow Spring Boot
 # relaxed binding of the properties in docs/design/implementation-spec.md section 8
-# (e.g. aws.dynamodb-endpoint -> AWS_DYNAMODBENDPOINT) and override application-local.yml.
+# (e.g. aws.endpoint-override.dynamodb-endpoint -> AWS_ENDPOINTOVERRIDE_DYNAMODBENDPOINT) and
+# override application-local.yml.
 x-app-environment: &app-environment
   <<: *emulator-credentials
   SPRING_PROFILES_ACTIVE: local
   # AWS endpoints = container hostnames on the compose network. The AWS_ENDPOINT_URL_*
   # variables are the SDK-native equivalents honoured by AWS SDK for Java v2 itself.
-  AWS_DYNAMODBENDPOINT: http://dynamodb-local:8000
-  AWS_SQSENDPOINT: http://localstack:4566
+  AWS_ENDPOINTOVERRIDE_DYNAMODBENDPOINT: http://dynamodb-local:8000
+  AWS_ENDPOINTOVERRIDE_SQSENDPOINT: http://localstack:4566
   AWS_ENDPOINT_URL_DYNAMODB: http://dynamodb-local:8000
   AWS_ENDPOINT_URL_SQS: http://localstack:4566
   # Same values as the application defaults aws.sqs.order-reservation-queue and
