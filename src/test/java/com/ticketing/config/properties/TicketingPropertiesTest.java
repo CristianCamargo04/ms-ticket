@@ -98,7 +98,7 @@ class TicketingPropertiesTest {
 
     @Test
     void shouldBindApplicationYmlWithSpecValues() {
-        TicketingProperties properties = YamlBinding.binderFor("application.yml")
+        TicketingProperties properties = YamlBinding.binderFor()
                 .bindOrCreate("ticketing", TicketingProperties.class);
 
         assertSpecDefaults(properties);
@@ -109,9 +109,9 @@ class TicketingPropertiesTest {
 
     @Test
     void shouldEnableMigrationsInLocalAndCiProfiles() {
-        TicketingProperties local = YamlBinding.binderFor("application.yml", "application-local.yml")
+        TicketingProperties local = YamlBinding.binderForProfile("local")
                 .bindOrCreate("ticketing", TicketingProperties.class);
-        TicketingProperties ci = YamlBinding.binderFor("application.yml", "application-ci.yml")
+        TicketingProperties ci = YamlBinding.binderForProfile("ci")
                 .bindOrCreate("ticketing", TicketingProperties.class);
 
         assertThat(local.migrations().enabled()).isTrue();
@@ -123,7 +123,7 @@ class TicketingPropertiesTest {
 
     @Test
     void shouldPointLocalProfileToTheLocalJwtIssuer() {
-        Binder binder = YamlBinding.binderFor("application.yml", "application-local.yml");
+        Binder binder = YamlBinding.binderForProfile("local");
 
         assertThat(binder.bind("spring.security.oauth2.resourceserver.jwt.issuer-uri", String.class).get())
                 .isEqualTo("http://localhost:8090/default");
@@ -133,7 +133,7 @@ class TicketingPropertiesTest {
 
     @Test
     void shouldConfigureOperationalSettings() {
-        Binder binder = YamlBinding.binderFor("application.yml");
+        Binder binder = YamlBinding.binderFor();
 
         assertThat(binder.bind("spring.application.name", String.class).get()).isEqualTo("ms-ticket");
         assertThat(binder.bind("server.shutdown", String.class).get()).isEqualTo("graceful");
@@ -149,13 +149,11 @@ class TicketingPropertiesTest {
     void shouldUseStructuredLoggingOnlyOutsideTheLocalProfile() {
         String key = "logging.structured.format.console";
 
-        assertThat(YamlBinding.binderFor("application.yml", "application-local.yml").bind(key, String.class)
+        assertThat(YamlBinding.binderForProfile("local").bind(key, String.class)
                 .isBound()).isFalse();
-        assertThat(YamlBinding.binderFor("application.yml", "application-dev.yml").bind(key, String.class).get())
+        assertThat(YamlBinding.binderForProfile("ci").bind(key, String.class).get())
                 .isEqualTo("ecs");
-        assertThat(YamlBinding.binderFor("application.yml", "application-ci.yml").bind(key, String.class).get())
-                .isEqualTo("ecs");
-        assertThat(YamlBinding.binderFor("application.yml", "application-prod.yml").bind(key, String.class).get())
+        assertThat(YamlBinding.binderForProfile("prod").bind(key, String.class).get())
                 .isEqualTo("ecs");
     }
 
@@ -187,8 +185,8 @@ class TicketingPropertiesTest {
 
     @Test
     void shouldServeTheActuatorOnTheManagementPortBehindTheLoadBalancerInProd() {
-        Binder prod = YamlBinding.binderFor("application.yml", "application-prod.yml");
-        Binder local = YamlBinding.binderFor("application.yml", "application-local.yml");
+        Binder prod = YamlBinding.binderForProfile("prod");
+        Binder local = YamlBinding.binderForProfile("local");
 
         assertThat(prod.bind("management.server.port", Integer.class).get()).isEqualTo(8081);
         assertThat(prod.bind("management.endpoint.health.probes.enabled", Boolean.class).get()).isTrue();
@@ -224,27 +222,22 @@ class TicketingPropertiesTest {
 
     /**
      * An environment like the one of an ECS task: the injected variables (as a plain source, so only placeholder
-     * resolution is exercised, not relaxed binding) on top of {@code application.yml} and the profile file.
+     * resolution is exercised, not relaxed binding) on top of the common and {@code prod} documents of {@code application.yml}.
      */
-    private static StandardEnvironment awsEnvironment(String profileFile) throws IOException {
+    private static StandardEnvironment awsEnvironment(String profile) {
         StandardEnvironment environment = new StandardEnvironment();
         environment.getPropertySources().remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);
         environment.getPropertySources().remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
-        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
-        for (String resource : new String[] {"application.yml", profileFile}) {
-            for (PropertySource<?> source : loader.load(resource, new ClassPathResource(resource))) {
-                environment.getPropertySources().addFirst(source);
-            }
+        for (PropertySource<?> document : YamlBinding.documentsFor(profile)) {
+            environment.getPropertySources().addFirst(document);
         }
         environment.getPropertySources().addFirst(new MapPropertySource("terraform", terraformEnvironment()));
         return environment;
     }
 
-    @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {"application-prod.yml", "application-dev.yml"})
-    void shouldResolveEveryAwsProfilePlaceholderWithTheVariablesTerraformInjects(String profileFile)
-            throws IOException {
-        StandardEnvironment environment = awsEnvironment(profileFile);
+    @Test
+    void shouldResolveEveryAwsProfilePlaceholderWithTheVariablesTerraformInjects() {
+        StandardEnvironment environment = awsEnvironment("prod");
 
         // strict resolution, like Spring Boot's auto-configuration conditions: an unresolvable placeholder throws
         assertThat(environment.getRequiredProperty("spring.security.oauth2.resourceserver.jwt.issuer-uri"))

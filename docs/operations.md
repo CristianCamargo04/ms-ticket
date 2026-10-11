@@ -42,14 +42,14 @@ ALB, WAF y ECS. El tablero `<project>-<env>` agrupa borde, colas, ECS y DynamoDB
 
 ### 1.3 Logs estructurados y correlación
 
-- Perfil `local`: texto plano (legible en `docker compose logs -f`). Perfiles `dev`, `ci` y `prod`:
+- Perfil `local`: texto plano (legible en `docker compose logs -f`). Perfiles `ci` y `prod`:
   **JSON ECS** (`logging.structured.format.console: ecs`), que incluye el MDC.
 - **`correlationId`** de punta a punta: `CorrelationIdWebFilter` acepta un `X-Correlation-Id` válido
   o genera un UUID → contexto Reactor → MDC (propagación automática de contexto) → atributo
   `correlationId` del mensaje SQS (y campo del body) → el listener lo restaura en el contexto/MDC
   del consumidor. Los mensajes re-publicados por el sweeper usan `correlationId = orderId`.
 - Micrometer Tracing (bridge OpenTelemetry) está en el classpath y genera `traceId`/`spanId` con
-  muestreo por perfil (`1.0` local, `0.5` dev, `0.0` ci, `0.1` prod), pero **no hay exporter
+  muestreo por perfil (`1.0` local, `0.0` ci, `0.1` prod), pero **no hay exporter
   configurado** ni propagación W3C por SQS (mejora documentada).
 
 Mensajes de log relevantes para operación:

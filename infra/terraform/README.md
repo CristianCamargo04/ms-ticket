@@ -377,7 +377,7 @@ Indicative idle baseline (us-east-1 list prices; check with the AWS Pricing Calc
 ## 6. Application contract
 
 The task definitions inject configuration with Spring Boot **relaxed binding** names
-(implementation-spec §8). OS environment variables override `application-prod.yml`:
+(implementation-spec §8). OS environment variables override the `prod` profile of `application.yml`:
 
 | Variable | Value |
 |---|---|

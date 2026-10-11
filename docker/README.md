@@ -230,7 +230,7 @@ management port; the probe follows it through `MANAGEMENT_SERVER_PORT` (or `HEAL
 so it stays writable (and exec-capable for Netty's native transport) under a read-only root
 filesystem such as ECS `readonlyRootFilesystem`. Compose mounts a 64 MB tmpfs there instead.
 
-Compose sets these variables, which override `application-local.yml` through Spring Boot relaxed
+Compose sets these variables, which override the `local` profile of `application.yml` through Spring Boot relaxed
 binding:
 
 | Variable | Value | Property |

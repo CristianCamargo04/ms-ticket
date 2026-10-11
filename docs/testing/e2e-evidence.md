@@ -422,7 +422,7 @@ The totals match k6 exactly: 135 reservations = 70 + 65 winning orders, 266 `SOL
 - Locally, more workers do not speed up the drop: they share the single DynamoDB Local CPU. Runs 4 and 11
   admitted more orders than runs 2 and 9, most likely because the slower system made the 2 s event cache see
   `available = 0` later. The decisions themselves stayed correct. In AWS the API scales out behind the ALB and DynamoDB on-demand is
-  not the constraint. A virtual waiting room in front of the API is listed in PLAN.md §9 for real drops.
+  not the constraint. A virtual waiting room in front of the API is listed in docs/limitations-and-improvements.md for real drops.
 - Conclusion: **the 300 ms p95 target holds for 500 buyers arriving within 15 s (~33 orders/s at the start)
   on a warm API, with 1 or 3 workers**. It does not hold for 500 orders within 1 s, nor for the first heavy run
   after an API restart.
@@ -488,7 +488,7 @@ With the normal configuration, folders 12 and 13 report `SKIPPED: hold TTL is 60
 `GET /api/v1/nope` (authenticated) → `404 {"detail":"No static resource api/v1/nope.","title":"Not Found",...}`,
 `PUT /api/v1/events` → `405`, `Content-Type: text/plain` on POST orders → `415`, 300 KB body → `413`. They are
 `application/problem+json` with `correlationId` and `timestamp`, but without the `errorCode` that every
-application error carries, which PLAN.md promises for every error. The 404 detail also reveals that the static
+application error carries, which the design promises for every error (fixed afterwards: framework errors now carry an errorCode). The 404 detail also reveals that the static
 resource handler is active.
 
 ### F-3 No circuit breaker metrics (observability gap)

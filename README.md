@@ -591,8 +591,8 @@ carga se puede escalar `ticketing-worker` y observar `sqs_messages_in_flight` en
 
 ## 13. Estructura de carpetas
 
-El código sigue **exactamente** la jerarquía de `prompt-jerarquia-carpetas.md` (paquete base
-`com.ticketing`): interfaz en el paquete padre e implementación en `impl/` con sufijo `Impl`,
+El código sigue una jerarquía de carpetas por capas (paquete base `com.ticketing`, reglas en
+[`docs/design/architecture-rules.md`](docs/design/architecture-rules.md)): interfaz en el paquete padre e implementación en `impl/` con sufijo `Impl`,
 dependencias `presentation → business.usecase → persistence | client | cache → domain` y un test
 espejo por clase.
 
@@ -706,8 +706,7 @@ Resumen (detalle y *trade-offs* en [docs/limitations-and-improvements.md](docs/l
 
 ## 17. Mapa requisito → dónde se cumple
 
-> El enunciado original no está versionado en el repositorio; los requisitos se agrupan según el
-> resumen usado en `PLAN.md`.
+> Los requisitos se agrupan según el enunciado de la prueba técnica.
 
 ### Requisitos funcionales
 

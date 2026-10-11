@@ -5,7 +5,7 @@
 
 ## Contexto
 
-El proyecto debe seguir una jerarquía de carpetas obligatoria (`prompt-jerarquia-carpetas.md`):
+El proyecto debe seguir una jerarquía de carpetas obligatoria:
 `presentation`, `business/usecase`, `domain`, `persistence`, `client`, `cache`, `config`, `enums`,
 `util`, con sufijos y dirección de dependencias fijados. Además el sistema tiene **tres canales de
 entrada** (REST, colas SQS y un temporizador de barrido) y **tres adaptadores de salida** (DynamoDB,
@@ -64,5 +64,5 @@ Reglas adicionales aplicadas:
 
 ## Referencias
 
-- `prompt-jerarquia-carpetas.md`, `docs/design/implementation-spec.md` §1,
+- `docs/design/implementation-spec.md` §1,
   `docs/design/architecture-rules.md`, `src/test/java/com/ticketing/architecture/`.

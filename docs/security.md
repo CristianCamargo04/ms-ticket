@@ -9,7 +9,7 @@ de las brechas conocidas. Las decisiones principales están en
 
 | Control | Implementación |
 |---|---|
-| Cero credenciales en código o YAML | Ningún `application*.yml` contiene claves. Los clientes AWS usan `DefaultCredentialsProvider` (`AwsClientConfig`): variables de entorno en local, **IAM task role** en ECS. No existen propiedades de credenciales. |
+| Cero credenciales en código o YAML | `application.yml` no contiene claves. Los clientes AWS usan `DefaultCredentialsProvider` (`AwsClientConfig`): variables de entorno en local, **IAM task role** en ECS. No existen propiedades de credenciales. |
 | Credenciales locales dummy | `.env` (git-ignored) se crea desde `.env.example` con valores de emulador (`test`/`test`). Usan el prefijo `LOCAL_AWS_*`: compose da prioridad a las variables de la shell sobre `.env`, así que con nombres `AWS_*` se reenviarían a los contenedores las credenciales reales exportadas por un desarrollador. Compose las inyecta como `AWS_*` solo dentro de los contenedores. |
 | Contexto de build | `.dockerignore` en modo *allowlist*: solo entran el wrapper de Gradle, los scripts de build, `src/main` y el probe de salud. Nunca `.git`, `.env`, tests, docs ni infra. |
 | AWS | Un task role y un execution role **por servicio** (api/worker), con permisos acotados a ARNs de tablas e índices; sin access keys de larga duración; CI debería asumir un rol por OIDC. Secretos (API key de la pasarela) en **Secrets Manager**, inyectados por ECS (`valueFrom`); Terraform crea solo un placeholder y el valor real se carga fuera de banda. |

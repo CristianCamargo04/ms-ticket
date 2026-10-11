@@ -33,7 +33,7 @@ x-emulator-credentials: &emulator-credentials
 # Environment shared by ticketing-api and ticketing-worker. Keys follow Spring Boot
 # relaxed binding of the properties in docs/design/implementation-spec.md section 8
 # (e.g. aws.endpoint-override.dynamodb-endpoint -> AWS_ENDPOINTOVERRIDE_DYNAMODBENDPOINT) and
-# override application-local.yml.
+# override the local profile of application.yml.
 x-app-environment: &app-environment
   <<: *emulator-credentials
   SPRING_PROFILES_ACTIVE: local

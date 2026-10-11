@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Keeps layer-private data structures (entities and DTOs) inside the layer that owns them
- * (implementation spec section 1 and {@code prompt-jerarquia-carpetas.md} rules 2-4).
+ * (implementation spec section 1 and docs/design/architecture-rules.md).
  */
 class EncapsulationRulesTest {
 

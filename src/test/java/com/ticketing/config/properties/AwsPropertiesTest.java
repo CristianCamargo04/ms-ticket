@@ -33,7 +33,7 @@ class AwsPropertiesTest {
 
     @Test
     void shouldNotOverrideEndpointsInTheCommonConfiguration() {
-        AwsProperties properties = YamlBinding.binderFor("application.yml").bindOrCreate("aws", AwsProperties.class);
+        AwsProperties properties = YamlBinding.binderFor().bindOrCreate("aws", AwsProperties.class);
 
         assertDefaultNames(properties);
         assertThat(properties.endpointOverride().dynamodbEndpoint()).isNull();
@@ -42,7 +42,7 @@ class AwsPropertiesTest {
 
     @Test
     void shouldPointLocalProfileToDynamoDbLocalAndLocalStack() {
-        AwsProperties properties = YamlBinding.binderFor("application.yml", "application-local.yml")
+        AwsProperties properties = YamlBinding.binderForProfile("local")
                 .bindOrCreate("aws", AwsProperties.class);
 
         assertDefaultNames(properties);

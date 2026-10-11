@@ -38,7 +38,7 @@ En compose el resto de imágenes también se fija por versión: `amazon/dynamodb
 
 ## Alternativas consideradas
 
-- **ElasticMQ** (API compatible con SQS): ligero y sin token; plan B documentado en `PLAN.md`. No
+- **ElasticMQ** (API compatible con SQS): ligero y sin token; plan B documentado. No
   fue necesario.
 - **SQS real en una cuenta AWS de desarrollo**: fidelidad total, pero requiere credenciales y
   costo para el evaluador.

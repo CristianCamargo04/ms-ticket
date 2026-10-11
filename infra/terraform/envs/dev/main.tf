@@ -16,7 +16,7 @@ locals {
 
   # Spring Boot relaxed binding: aws.dynamodb.tables.ticketTransitions <-
   # AWS_DYNAMODB_TABLES_TICKETTRANSITIONS, etc. (implementation-spec section 8).
-  # OS environment variables override application-prod.yml.
+  # OS environment variables override the prod profile of application.yml.
   common_environment = {
     SPRING_PROFILES_ACTIVE                = var.spring_profiles_active
     AWS_REGION                            = var.aws_region
