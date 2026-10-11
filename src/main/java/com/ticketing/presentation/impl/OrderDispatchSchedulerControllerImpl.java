@@ -3,21 +3,17 @@ package com.ticketing.presentation.impl;
 import com.ticketing.business.usecase.RepublishStaleOrdersUseCase;
 import com.ticketing.domain.data.SweepResult;
 import com.ticketing.presentation.OrderDispatchSchedulerController;
-import java.util.Objects;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class OrderDispatchSchedulerControllerImpl implements OrderDispatchSchedulerController {
 
     private final RepublishStaleOrdersUseCase republishStaleOrdersUseCase;
-
-    public OrderDispatchSchedulerControllerImpl(RepublishStaleOrdersUseCase republishStaleOrdersUseCase) {
-        this.republishStaleOrdersUseCase = Objects.requireNonNull(republishStaleOrdersUseCase,
-                "republishStaleOrdersUseCase");
-    }
 
     @Override
     public Mono<SweepResult> execute() {

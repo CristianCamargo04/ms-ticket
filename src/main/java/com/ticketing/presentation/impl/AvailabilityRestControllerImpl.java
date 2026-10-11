@@ -8,21 +8,20 @@ import com.ticketing.presentation.dto.AvailabilityResponseDto;
 import com.ticketing.presentation.impl.support.ResourceIdValidator;
 import com.ticketing.presentation.mapper.AvailabilityDtoMapper;
 import java.time.Duration;
-import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @RestController
+@RequiredArgsConstructor
 public class AvailabilityRestControllerImpl implements AvailabilityRestController {
     static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
-
     static final String HEARTBEAT_COMMENT = "keepalive";
-
     static final Duration MAX_STREAM_LIFETIME = Duration.ofMinutes(30);
 
     private final GetEventAvailabilityUseCase getEventAvailabilityUseCase;
@@ -31,16 +30,6 @@ public class AvailabilityRestControllerImpl implements AvailabilityRestControlle
 
     private final ConcurrentMap<String, Flux<ServerSentEvent<AvailabilityResponseDto>>> sharedStreams =
             new ConcurrentHashMap<>();
-
-    public AvailabilityRestControllerImpl(GetEventAvailabilityUseCase getEventAvailabilityUseCase,
-                                          StreamEventAvailabilityUseCase streamEventAvailabilityUseCase,
-                                          AvailabilityDtoMapper mapper) {
-        this.getEventAvailabilityUseCase = Objects.requireNonNull(getEventAvailabilityUseCase,
-                "getEventAvailabilityUseCase");
-        this.streamEventAvailabilityUseCase = Objects.requireNonNull(streamEventAvailabilityUseCase,
-                "streamEventAvailabilityUseCase");
-        this.mapper = Objects.requireNonNull(mapper, "mapper");
-    }
 
     @Override
     public Mono<AvailabilityResponseDto> getAvailability(String eventId) {

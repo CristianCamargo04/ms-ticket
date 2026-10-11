@@ -9,32 +9,20 @@ import com.ticketing.presentation.impl.idempotency.IdempotencyKeyResolver;
 import com.ticketing.presentation.impl.idempotency.RequestFingerprintCalculator;
 import com.ticketing.presentation.impl.support.ResourceIdValidator;
 import com.ticketing.presentation.mapper.OrderDtoMapper;
-import java.util.Objects;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 
 @RestController
+@RequiredArgsConstructor
 public class ComplimentaryRestControllerImpl implements ComplimentaryRestController {
     private final IssueComplimentaryTicketsUseCase issueComplimentaryTicketsUseCase;
     private final RequestContextResolver requestContextResolver;
     private final IdempotencyKeyResolver idempotencyKeyResolver;
     private final RequestFingerprintCalculator fingerprintCalculator;
     private final OrderDtoMapper mapper;
-
-    public ComplimentaryRestControllerImpl(IssueComplimentaryTicketsUseCase issueComplimentaryTicketsUseCase,
-                                           RequestContextResolver requestContextResolver,
-                                           IdempotencyKeyResolver idempotencyKeyResolver,
-                                           RequestFingerprintCalculator fingerprintCalculator,
-                                           OrderDtoMapper mapper) {
-        this.issueComplimentaryTicketsUseCase = Objects.requireNonNull(issueComplimentaryTicketsUseCase,
-                "issueComplimentaryTicketsUseCase");
-        this.requestContextResolver = Objects.requireNonNull(requestContextResolver, "requestContextResolver");
-        this.idempotencyKeyResolver = Objects.requireNonNull(idempotencyKeyResolver, "idempotencyKeyResolver");
-        this.fingerprintCalculator = Objects.requireNonNull(fingerprintCalculator, "fingerprintCalculator");
-        this.mapper = Objects.requireNonNull(mapper, "mapper");
-    }
 
     @Override
     public Mono<ResponseEntity<OrderAcceptedResponseDto>> issueComplimentary(String eventId, String idempotencyKey,

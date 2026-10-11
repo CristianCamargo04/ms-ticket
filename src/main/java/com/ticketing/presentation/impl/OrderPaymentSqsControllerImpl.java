@@ -7,7 +7,7 @@ import com.ticketing.presentation.context.RequestContext;
 import com.ticketing.presentation.dto.message.PaymentRequestedMessageRequestDto;
 import com.ticketing.presentation.impl.support.JsonMessageReader;
 import com.ticketing.presentation.mapper.OrderMessageDtoMapper;
-import java.util.Objects;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
@@ -15,19 +15,12 @@ import reactor.util.context.Context;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class OrderPaymentSqsControllerImpl implements OrderPaymentSqsController {
 
     private final JsonMessageReader messageReader;
     private final OrderMessageDtoMapper mapper;
     private final ProcessOrderPaymentUseCase processOrderPaymentUseCase;
-
-    public OrderPaymentSqsControllerImpl(JsonMessageReader messageReader, OrderMessageDtoMapper mapper,
-                                         ProcessOrderPaymentUseCase processOrderPaymentUseCase) {
-        this.messageReader = Objects.requireNonNull(messageReader, "messageReader");
-        this.mapper = Objects.requireNonNull(mapper, "mapper");
-        this.processOrderPaymentUseCase = Objects.requireNonNull(processOrderPaymentUseCase,
-                "processOrderPaymentUseCase");
-    }
 
     @Override
     public Mono<Void> handle(String payload) {

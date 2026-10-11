@@ -3,22 +3,17 @@ package com.ticketing.presentation.impl;
 import com.ticketing.business.usecase.ReleaseExpiredReservationsUseCase;
 import com.ticketing.domain.data.SweepResult;
 import com.ticketing.presentation.ReservationExpirationSchedulerController;
-import java.util.Objects;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class ReservationExpirationSchedulerControllerImpl implements ReservationExpirationSchedulerController {
 
     private final ReleaseExpiredReservationsUseCase releaseExpiredReservationsUseCase;
-
-    public ReservationExpirationSchedulerControllerImpl(
-            ReleaseExpiredReservationsUseCase releaseExpiredReservationsUseCase) {
-        this.releaseExpiredReservationsUseCase = Objects.requireNonNull(releaseExpiredReservationsUseCase,
-                "releaseExpiredReservationsUseCase");
-    }
 
     @Override
     public Mono<SweepResult> execute() {
