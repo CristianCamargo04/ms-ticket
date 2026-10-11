@@ -9,7 +9,7 @@ dead-letter queues, an OAuth2/JWT issuer and a payment gateway, all emulated in 
 | `localstack` | `localstack/localstack:4.9` | 4566 | SQS: 2 queues + 2 DLQs created by `src/main/resources/scripts/localstack/init-sqs.sh` |
 | `payment-mock` | `wiremock/wiremock:3.13.2` | 8089 | Payment gateway (`docker/wiremock`) |
 | `auth-mock` | `ghcr.io/navikt/mock-oauth2-server:6.0.5` | 8090 | JWT issuer + JWKS (`docker/auth-mock/config.json`) |
-| `ticketing-api` | `ms-ticket:local` (built from `Dockerfile`) | 8080 | REST API + actuator, `TICKETING_RUNTIMEMODE=API` |
+| `ticketing-api` | `ms-ticket:local` (built from `Dockerfile`) | 8180 | REST API + actuator, `TICKETING_RUNTIMEMODE=API` |
 | `ticketing-worker` | `ms-ticket:local` | - | SQS consumers + sweepers, `TICKETING_RUNTIMEMODE=WORKER` |
 | `dynamodb-admin` (profile `tools`) | `aaronshaf/dynamodb-admin:5.3.4` | 8001 | Table browser |
 
@@ -23,7 +23,7 @@ docker compose up -d --build --wait        # full stack, returns when everything
 scripts/infra/verify-infra.sh              # smoke test of queues, tables, payments and tokens
 
 TOKEN="$(scripts/infra/get-token.sh customer-1)"
-curl -H "Authorization: Bearer ${TOKEN}" http://localhost:8080/api/v1/events
+curl -H "Authorization: Bearer ${TOKEN}" http://localhost:8180/api/v1/events
 
 docker compose down -v                     # stop and wipe all state
 ```
@@ -92,7 +92,7 @@ docker compose logs -f ticketing-worker                   # every replica, prefi
 docker compose up -d --wait --scale ticketing-worker=1    # back to one
 ```
 
-- The worker publishes no host ports, so replicas never collide. The API publishes 8080 and stays
+- The worker publishes no host ports, so replicas never collide. The API publishes host port 8180 (8080 stays free for the app run from the IDE) and stays
   at one replica.
 - All replicas long-poll the same two queues. SQS hands each message to one consumer at a time
   (visibility timeout 60 s), redelivers it if the consumer fails or dies, and moves it to the DLQ

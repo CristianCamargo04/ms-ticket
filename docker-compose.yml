@@ -276,7 +276,7 @@ services:
       # The API owns the local schema: it applies the DynamoDB migrations on startup.
       TICKETING_MIGRATIONS_ENABLED: "true"
     ports:
-      - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
+      - "127.0.0.1:${API_HOST_PORT:-8180}:8080"
     depends_on:
       dynamodb-local:
         condition: service_healthy
