@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import reactor.core.Disposable;
@@ -19,9 +20,12 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
+import reactor.util.context.Context;
 
 class EventCacheServiceImplTest {
 
+    /** Reactor context key under which the web filter stores the correlation id. */
+    private static final String CORRELATION_ID_KEY = "correlationId";
     private static final Instant NOW = Instant.parse("2026-10-10T12:00:00Z");
     private static final Duration TTL = Duration.ofSeconds(2);
     private static final EventData EVENT = event("e-1");
@@ -178,6 +182,50 @@ class EventCacheServiceImplTest {
                 .expectNext(EVENT)
                 .verifyComplete();
         StepVerifier.create(cache.get("e-1", loader)).expectNext(EVENT).verifyComplete();
+
+        assertThat(loads).hasValue(1);
+    }
+
+    @Test
+    void shouldRunTheSharedLoadWithTheReactorContextOfTheTriggeringCaller() {
+        AtomicReference<String> loaderCorrelationId = new AtomicReference<>();
+        Function<String, Mono<EventData>> loader = _ -> {
+            loads.incrementAndGet();
+            return Mono.deferContextual(context -> {
+                loaderCorrelationId.set(context.getOrDefault(CORRELATION_ID_KEY, "none"));
+                return Mono.just(EVENT);
+            });
+        };
+
+        StepVerifier.create(cache.get("e-1", loader).contextWrite(Context.of(CORRELATION_ID_KEY, "corr-1")))
+                .expectNext(EVENT)
+                .verifyComplete();
+        StepVerifier.create(cache.get("e-1", loader).contextWrite(Context.of(CORRELATION_ID_KEY, "corr-2")))
+                .expectNext(EVENT)
+                .verifyComplete();
+
+        assertThat(loaderCorrelationId).hasValue("corr-1");
+        assertThat(loads).hasValue(1);
+    }
+
+    @Test
+    void shouldKeepEachCallersOwnContextDownstreamOfAJoinedLoad() {
+        Sinks.One<EventData> pendingLoad = Sinks.one();
+        Function<String, Mono<EventData>> loader = loaderReturning(pendingLoad.asMono());
+        Mono<String> first = cache.get("e-1", loader)
+                .flatMap(_ -> Mono.deferContextual(context -> Mono.just(context.<String>get(CORRELATION_ID_KEY))))
+                .contextWrite(Context.of(CORRELATION_ID_KEY, "corr-1"));
+        Mono<String> second = cache.get("e-1", loader)
+                .flatMap(_ -> Mono.deferContextual(context -> Mono.just(context.<String>get(CORRELATION_ID_KEY))))
+                .contextWrite(Context.of(CORRELATION_ID_KEY, "corr-2"));
+
+        StepVerifier.create(Mono.zip(first, second))
+                .then(() -> pendingLoad.tryEmitValue(EVENT))
+                .assertNext(both -> {
+                    assertThat(both.getT1()).isEqualTo("corr-1");
+                    assertThat(both.getT2()).isEqualTo("corr-2");
+                })
+                .verifyComplete();
 
         assertThat(loads).hasValue(1);
     }

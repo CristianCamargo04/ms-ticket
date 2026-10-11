@@ -30,7 +30,8 @@ import reactor.util.retry.RetryBackoffSpec;
  *   <li>{@code timeout(callTimeout)} bounds each attempt (connect + response + body);</li>
  *   <li>up to {@code maxRetries} retries with exponential backoff and jitter, <em>only</em> for transient failures
  *   ({@link #isTransientFailure(Throwable)}: 5xx, timeouts, connection errors). Retrying a charge is safe because
- *   the gateway deduplicates on the {@code Idempotency-Key} header (the order id);</li>
+ *   the gateway deduplicates on the {@code Idempotency-Key} header (the order id), which is therefore mandatory:
+ *   a call without a non-blank key is rejected before any request is sent;</li>
  *   <li>the resilience4j circuit breaker, which sees one call per operation (all its attempts) and fails fast with
  *   {@link CallNotPermittedException} while open;</li>
  *   <li>every remaining failure becomes a {@link PaymentGatewayException} (retryable), logged with the operation
@@ -86,12 +87,21 @@ public final class PaymentGatewayChargeClientImpl implements PaymentGatewayCharg
                 PaymentGatewayChargeClientImpl::isTransientFailure);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @throws NullPointerException     if the request or its idempotency key is {@code null}
+     * @throws IllegalArgumentException if the idempotency key is blank: an unkeyed charge would be retried without
+     *                                  deduplication and could capture the payment several times, so it never
+     *                                  reaches the gateway
+     */
     @Override
     public Mono<PaymentOutcome> charge(PaymentChargeRequest request) {
         Objects.requireNonNull(request, "request");
+        String idempotencyKey = requireIdempotencyKey(request.idempotencyKey());
         Mono<PaymentOutcome> call = webClient.post()
                 .uri(CHARGES_PATH)
-                .header(IDEMPOTENCY_KEY_HEADER, request.idempotencyKey())
+                .header(IDEMPOTENCY_KEY_HEADER, idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON)
                 .bodyValue(mapper.toChargeRequest(request))
@@ -99,12 +109,18 @@ public final class PaymentGatewayChargeClientImpl implements PaymentGatewayCharg
                 .bodyToMono(ChargeResponseDto.class)
                 .map(mapper::toOutcome)
                 .switchIfEmpty(Mono.error(() -> emptyResponse(CHARGE)));
-        return resilient(call, CHARGE, request.idempotencyKey());
+        return resilient(call, CHARGE, idempotencyKey);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @throws NullPointerException     if the idempotency key is {@code null}
+     * @throws IllegalArgumentException if the idempotency key is blank
+     */
     @Override
     public Mono<PaymentOutcome> findCharge(String idempotencyKey) {
-        Objects.requireNonNull(idempotencyKey, "idempotencyKey");
+        requireIdempotencyKey(idempotencyKey);
         Mono<PaymentOutcome> call = webClient.get()
                 .uri(CHARGE_PATH, idempotencyKey)
                 .accept(MediaType.APPLICATION_JSON)
@@ -132,6 +148,18 @@ public final class PaymentGatewayChargeClientImpl implements PaymentGatewayCharg
             case WebClientRequestException _, TimeoutException _ -> true;
             case null, default -> false;
         };
+    }
+
+    /**
+     * Precondition of every gateway call: the idempotency key is what makes a retried charge safe, so a missing or
+     * blank key is a programming error (spec section 11, item 10) rejected before any request is built.
+     */
+    private static String requireIdempotencyKey(String idempotencyKey) {
+        Objects.requireNonNull(idempotencyKey, "idempotencyKey");
+        if (idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("idempotencyKey must not be blank");
+        }
+        return idempotencyKey;
     }
 
     private Mono<PaymentOutcome> resilient(Mono<PaymentOutcome> call, String operation, String idempotencyKey) {

@@ -14,8 +14,11 @@ import com.ticketing.domain.exception.MessagePublishingException;
 import com.ticketing.domain.internal_request.OrderReservationMessage;
 import com.ticketing.domain.internal_request.PaymentRequestedMessage;
 import com.ticketing.enums.ErrorCodeEnum;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -65,7 +68,10 @@ class SqsOrderQueueClientImplTest {
     }
 
     private static GetQueueUrlRequest queueUrlRequest(String queueName) {
-        return GetQueueUrlRequest.builder().queueName(queueName).build();
+        return GetQueueUrlRequest.builder()
+                .queueName(queueName)
+                .overrideConfiguration(SqsOrderQueueClientImpl.PUBLISH_OVERRIDE)
+                .build();
     }
 
     private SendMessageRequest capturedSendRequest() {
@@ -243,6 +249,104 @@ class SqsOrderQueueClientImplTest {
 
         assertThat(publication).isNotNull();
         verify(sqsAsyncClient, never()).getQueueUrl(any(GetQueueUrlRequest.class));
+    }
+
+    @Test
+    void shouldBoundTheQueueUrlLookupWithThePublishTimeoutsInsteadOfTheLongPollingDefaults() {
+        when(sqsAsyncClient.getQueueUrl(any(GetQueueUrlRequest.class))).thenReturn(queueUrl(PAYMENT_URL));
+        when(sqsAsyncClient.sendMessage(any(SendMessageRequest.class))).thenReturn(sent("msg-1"));
+
+        StepVerifier.create(newClient().publishPaymentRequested(PAYMENT)).expectNext("msg-1").verifyComplete();
+
+        ArgumentCaptor<GetQueueUrlRequest> captor = ArgumentCaptor.forClass(GetQueueUrlRequest.class);
+        verify(sqsAsyncClient).getQueueUrl(captor.capture());
+        assertThat(captor.getValue().queueName()).isEqualTo(PAYMENT_QUEUE);
+        assertThat(captor.getValue().overrideConfiguration()).hasValueSatisfying(override -> {
+            assertThat(override.apiCallTimeout()).contains(SqsOrderQueueClientImpl.PUBLISH_CALL_TIMEOUT);
+            assertThat(override.apiCallAttemptTimeout()).contains(SqsOrderQueueClientImpl.PUBLISH_ATTEMPT_TIMEOUT);
+        });
+    }
+
+    @Test
+    void shouldFailWithinThePublishTimeoutWhenTheQueueUrlLookupNeverCompletes() {
+        CompletableFuture<GetQueueUrlResponse> hangingLookup = new CompletableFuture<>();
+        when(sqsAsyncClient.getQueueUrl(queueUrlRequest(RESERVATION_QUEUE))).thenReturn(hangingLookup);
+        Duration timeout = SqsOrderQueueClientImpl.PUBLISH_CALL_TIMEOUT;
+
+        StepVerifier.withVirtualTime(() -> newClient().publishReservationRequested(RESERVATION))
+                .expectSubscription()
+                .expectNoEvent(timeout.minusMillis(1))
+                .thenAwait(Duration.ofMillis(1))
+                .expectErrorSatisfies(error -> assertThat(error)
+                        .isInstanceOf(MessagePublishingException.class)
+                        .hasCauseInstanceOf(TimeoutException.class))
+                .verify(Duration.ofSeconds(5));
+
+        assertThat(hangingLookup).isCancelled();
+        verify(sqsAsyncClient, never()).sendMessage(any(SendMessageRequest.class));
+    }
+
+    @Test
+    void shouldLookUpAgainAfterATimedOutLookup() {
+        when(sqsAsyncClient.getQueueUrl(queueUrlRequest(RESERVATION_QUEUE)))
+                .thenReturn(new CompletableFuture<>())
+                .thenReturn(queueUrl(RESERVATION_URL));
+        when(sqsAsyncClient.sendMessage(any(SendMessageRequest.class))).thenReturn(sent("msg-1"));
+
+        StepVerifier.withVirtualTime(() -> {
+                    SqsOrderQueueClientImpl client = newClient();
+                    return client.publishReservationRequested(RESERVATION)
+                            .onErrorResume(MessagePublishingException.class,
+                                    _ -> client.publishReservationRequested(RESERVATION));
+                })
+                .expectSubscription()
+                .thenAwait(SqsOrderQueueClientImpl.PUBLISH_CALL_TIMEOUT)
+                .expectNext("msg-1")
+                .verifyComplete();
+
+        verify(sqsAsyncClient, times(2)).getQueueUrl(any(GetQueueUrlRequest.class));
+    }
+
+    @Test
+    void shouldPublishTheSameGeneratedCorrelationIdInBodyAndAttributesOnEveryAttempt() {
+        when(sqsAsyncClient.getQueueUrl(queueUrlRequest(RESERVATION_QUEUE))).thenReturn(queueUrl(RESERVATION_URL));
+        when(sqsAsyncClient.sendMessage(any(SendMessageRequest.class)))
+                .thenReturn(CompletableFuture.failedFuture(SdkClientException.create("throttled")))
+                .thenReturn(sent("msg-1"));
+        OrderReservationMessage withoutCorrelationId =
+                new OrderReservationMessage("order-1", "event-1", null, OCCURRED_AT);
+
+        StepVerifier.create(newClient().publishReservationRequested(withoutCorrelationId).retry(1))
+                .expectNext("msg-1")
+                .verifyComplete();
+
+        ArgumentCaptor<SendMessageRequest> captor = ArgumentCaptor.forClass(SendMessageRequest.class);
+        verify(sqsAsyncClient, times(2)).sendMessage(captor.capture());
+        List<String> bodyIds = captor.getAllValues().stream()
+                .map(request -> jsonMapper.readTree(request.messageBody()).get("correlationId").asString())
+                .toList();
+        List<String> attributeIds = captor.getAllValues().stream()
+                .map(request -> request.messageAttributes().get("correlationId").stringValue())
+                .toList();
+        assertThat(bodyIds).hasSize(2).containsOnly(bodyIds.getFirst());
+        assertThat(bodyIds.getFirst()).matches(SqsOrderQueueClientMapper.CORRELATION_ID_PATTERN);
+        assertThat(attributeIds).isEqualTo(bodyIds);
+    }
+
+    @Test
+    void shouldPublishAPaymentMessageWithAGeneratedCorrelationIdWhenTheMessageHasNone() {
+        when(sqsAsyncClient.getQueueUrl(queueUrlRequest(PAYMENT_QUEUE))).thenReturn(queueUrl(PAYMENT_URL));
+        when(sqsAsyncClient.sendMessage(any(SendMessageRequest.class))).thenReturn(sent("msg-2"));
+
+        StepVerifier.create(newClient().publishPaymentRequested(
+                        new PaymentRequestedMessage("order-1", "tok_secret", " ", OCCURRED_AT)))
+                .expectNext("msg-2")
+                .verifyComplete();
+
+        SendMessageRequest request = capturedSendRequest();
+        String bodyId = jsonMapper.readTree(request.messageBody()).get("correlationId").asString();
+        assertThat(bodyId).matches(SqsOrderQueueClientMapper.CORRELATION_ID_PATTERN);
+        assertThat(request.messageAttributes().get("correlationId").stringValue()).isEqualTo(bodyId);
     }
 
     @Test

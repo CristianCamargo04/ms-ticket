@@ -1,6 +1,7 @@
 package com.ticketing.client.rest.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import com.ticketing.client.mapper.PaymentGatewayChargeClientMapper;
@@ -23,6 +24,8 @@ import mockwebserver3.RecordedRequest;
 import mockwebserver3.junit5.StartStop;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -407,6 +410,49 @@ class PaymentGatewayChargeClientImplTest {
         assertThat(PaymentGatewayChargeClientImpl.isTransientFailure(new TimeoutException())).isTrue();
         assertThat(PaymentGatewayChargeClientImpl.isTransientFailure(new IllegalStateException())).isFalse();
         assertThat(PaymentGatewayChargeClientImpl.isTransientFailure(null)).isFalse();
+    }
+
+    private static PaymentChargeRequest requestWithIdempotencyKey(String idempotencyKey) {
+        return new PaymentChargeRequest(idempotencyKey, "order-1", "customer-1", new BigDecimal("150.00"), "USD",
+                "tok_secret");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "\t"})
+    void shouldNeverSendAChargeOrLookupWithABlankIdempotencyKey(String blankKey) {
+        server.enqueue(status(503));
+        server.enqueue(json(200, APPROVED));
+
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> client.charge(requestWithIdempotencyKey(blankKey)))
+                .withMessageContaining("idempotencyKey");
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> client.findCharge(blankKey))
+                .withMessageContaining("idempotencyKey");
+
+        assertThat(server.getRequestCount()).isZero();
+        assertThat(circuitBreaker.getMetrics().getNumberOfBufferedCalls()).isZero();
+    }
+
+    @Test
+    void shouldNeverSendAChargeWithoutIdempotencyKey() {
+        server.enqueue(status(503));
+        server.enqueue(json(200, APPROVED));
+
+        assertThatNullPointerException()
+                .isThrownBy(() -> client.charge(requestWithIdempotencyKey(null)))
+                .withMessageContaining("idempotencyKey");
+
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void shouldSurfaceAMissingIdempotencyKeyAsAnErrorSignalInsideAPipeline() {
+        StepVerifier.create(Mono.just(requestWithIdempotencyKey(" ")).flatMap(client::charge))
+                .expectError(IllegalArgumentException.class)
+                .verify(VERIFY_TIMEOUT);
+
+        assertThat(server.getRequestCount()).isZero();
     }
 
     @Test

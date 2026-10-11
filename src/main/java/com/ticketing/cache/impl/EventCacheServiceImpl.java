@@ -24,6 +24,10 @@ import reactor.core.publisher.Mono;
  *   <li>Entries expire {@link EventCacheSettings#ttl()} after the load completes and the cache holds at most
  *   {@link EventCacheSettings#maxSize()} events.</li>
  *   <li>A caller that cancels (e.g. a client disconnect) never cancels the shared load of the other callers.</li>
+ *   <li>The shared load is subscribed outside the caller's pipeline (as a future), so it explicitly runs with the
+ *   Reactor context of the caller that triggered it: the correlation id and the tracing/observation state reach the
+ *   loader (and, with automatic context propagation, its log lines). Callers that join an in-flight load keep their
+ *   own context downstream.</li>
  * </ul>
  * The cache never blocks: callers subscribe to the shared future.
  */
@@ -63,7 +67,8 @@ public final class EventCacheServiceImpl implements EventCacheService {
     public Mono<EventData> get(String eventId, Function<String, Mono<EventData>> loader) {
         Objects.requireNonNull(eventId, "eventId");
         Objects.requireNonNull(loader, "loader");
-        return Mono.fromFuture(() -> cache.get(eventId, (id, _) -> loader.apply(id).toFuture()), true);
+        return Mono.deferContextual(context -> Mono.fromFuture(
+                () -> cache.get(eventId, (id, _) -> loader.apply(id).contextWrite(context).toFuture()), true));
     }
 
     @Override

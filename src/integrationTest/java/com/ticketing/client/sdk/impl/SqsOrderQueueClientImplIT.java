@@ -8,6 +8,9 @@ import com.ticketing.config.properties.AwsProperties;
 import com.ticketing.domain.exception.MessagePublishingException;
 import com.ticketing.domain.internal_request.OrderReservationMessage;
 import com.ticketing.domain.internal_request.PaymentRequestedMessage;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -55,11 +58,16 @@ class SqsOrderQueueClientImplIT {
 
     @BeforeAll
     static void createClient() {
+        sqs = sqsClient(LOCALSTACK.getEndpoint().toString());
+    }
+
+    /** An SQS client exactly as the application builds it, pointed at {@code endpoint}. */
+    private static SqsAsyncClient sqsClient(String endpoint) {
         AwsProperties properties = new Binder(new MapConfigurationPropertySource(Map.of(
                 "aws.region", LOCALSTACK.getRegion(),
-                "aws.endpoint-override.sqs-endpoint", LOCALSTACK.getEndpoint().toString())))
+                "aws.endpoint-override.sqs-endpoint", endpoint)))
                 .bindOrCreate("aws", AwsProperties.class);
-        sqs = new AwsClientConfig().sqsAsyncClient(properties, StaticCredentialsProvider.create(
+        return new AwsClientConfig().sqsAsyncClient(properties, StaticCredentialsProvider.create(
                 AwsBasicCredentials.create(LOCALSTACK.getAccessKey(), LOCALSTACK.getSecretKey())));
     }
 
@@ -178,6 +186,49 @@ class SqsOrderQueueClientImplIT {
                 .verify(VERIFY_TIMEOUT);
         assertThat(jsonMapper.readTree(receiveOne(reservationUrl).body()).get("orderId").asString())
                 .isEqualTo("order-3");
+    }
+
+    @Test
+    void shouldPublishAGeneratedCorrelationIdInBodyAndAttributesWhenTheMessageHasNone() {
+        String reservationQueue = uniqueQueueName("sweeper-reservation");
+        String reservationUrl = createQueue(reservationQueue);
+        SqsOrderQueueClientImpl client = newClient(reservationQueue, uniqueQueueName("payment"));
+
+        StepVerifier.create(client.publishReservationRequested(
+                        new OrderReservationMessage("order-4", "event-4", null, OCCURRED_AT)))
+                .expectNextCount(1)
+                .expectComplete()
+                .verify(VERIFY_TIMEOUT);
+
+        Message message = receiveOne(reservationUrl);
+        JsonNode correlationId = jsonMapper.readTree(message.body()).get("correlationId");
+        assertThat(correlationId.isString()).isTrue();
+        assertThat(correlationId.asString()).matches(SqsOrderQueueClientMapper.CORRELATION_ID_PATTERN);
+        assertAttribute(message, "correlationId", "String", correlationId.asString());
+    }
+
+    /**
+     * An endpoint that accepts TCP connections (the kernel completes the handshake into the listen backlog) but
+     * never answers: without per-request timeouts the lookup would wait for the client's long-polling defaults
+     * (60 s per call).
+     */
+    @Test
+    void shouldGiveUpWithinThePublishTimeoutWhenSqsNeverAnswersTheQueueUrlLookup() throws IOException {
+        try (ServerSocket silentEndpoint = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+             SqsAsyncClient silentSqs = sqsClient("http://127.0.0.1:" + silentEndpoint.getLocalPort())) {
+            SqsOrderQueueClientImpl client = new SqsOrderQueueClientImpl(silentSqs,
+                    new SqsQueueNames("unreachable-reservation", "unreachable-payment"),
+                    new SqsOrderQueueClientMapper(), jsonMapper);
+            long startNanos = System.nanoTime();
+
+            StepVerifier.create(client.publishReservationRequested(
+                            new OrderReservationMessage("order-5", "event-5", "corr-5", OCCURRED_AT)))
+                    .expectError(MessagePublishingException.class)
+                    .verify(SqsOrderQueueClientImpl.PUBLISH_CALL_TIMEOUT.plusSeconds(5));
+
+            assertThat(Duration.ofNanos(System.nanoTime() - startNanos))
+                    .isLessThan(SqsOrderQueueClientImpl.PUBLISH_CALL_TIMEOUT.plusSeconds(3));
+        }
     }
 
     @Test
