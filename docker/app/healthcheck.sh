@@ -10,14 +10,18 @@
 #
 # Environment (all optional):
 #   HEALTHCHECK_HOST             default 127.0.0.1
-#   HEALTHCHECK_PORT             default ${SERVER_PORT:-8080}
+#   HEALTHCHECK_PORT             default ${MANAGEMENT_SERVER_PORT:-${SERVER_PORT:-8080}}
 #   HEALTHCHECK_PATH             default /actuator/health/readiness
 #   HEALTHCHECK_TIMEOUT_SECONDS  default 3
+#
+# Locally the actuator shares the HTTP port 8080 (management.server.port is unset), so
+# the default needs no configuration. Only the AWS deployment moves the actuator to a
+# separate management port; set MANAGEMENT_SERVER_PORT (or HEALTHCHECK_PORT) there.
 # -----------------------------------------------------------------------------
 set -uo pipefail
 
 host="${HEALTHCHECK_HOST:-127.0.0.1}"
-port="${HEALTHCHECK_PORT:-${SERVER_PORT:-8080}}"
+port="${HEALTHCHECK_PORT:-${MANAGEMENT_SERVER_PORT:-${SERVER_PORT:-8080}}}"
 path="${HEALTHCHECK_PATH:-/actuator/health/readiness}"
 timeout_seconds="${HEALTHCHECK_TIMEOUT_SECONDS:-3}"
 

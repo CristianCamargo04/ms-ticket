@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
 # Smoke test of the local infrastructure containers (the application is not needed):
-#   1. LocalStack  - the four queues exist with the expected visibility timeout, long
+#   1. LocalStack  - the four queues (ticketing-order-reservation, ticketing-order-payment
+#                    and their "<queue>-dlq") exist with the expected visibility timeout, long
 #                    polling, SSE and redrive policy, and a poison message really
 #                    lands in the DLQ after maxReceiveCount receives
 #   2. DynamoDB    - DynamoDB Local answers ListTables
@@ -34,8 +35,8 @@ PAYMENT_URL="http://localhost:$(setting PAYMENT_MOCK_HOST_PORT 8089)"
 AUTH_PORT="$(setting AUTH_MOCK_HOST_PORT 8090)"
 EXPECTED_ISSUER="http://localhost:${AUTH_PORT}/default"
 QUEUES=(
-  "$(setting SQS_ORDER_RESERVATION_QUEUE order-reservation-queue)"
-  "$(setting SQS_ORDER_PAYMENT_QUEUE order-payment-queue)"
+  "$(setting SQS_ORDER_RESERVATION_QUEUE ticketing-order-reservation)"
+  "$(setting SQS_ORDER_PAYMENT_QUEUE ticketing-order-payment)"
 )
 readonly REGION DYNAMODB_URL PAYMENT_URL AUTH_PORT EXPECTED_ISSUER QUEUES
 
@@ -57,7 +58,7 @@ sqs() {
 # ---------------------------------------------------------------------------
 echo "1. LocalStack SQS"
 for queue in "${QUEUES[@]}"; do
-  dlq="${queue%-queue}-dlq"
+  dlq="${queue}-dlq"
   for name in "${queue}" "${dlq}"; do
     if url="$(sqs get-queue-url --queue-name "${name}" --query QueueUrl --output text 2>/dev/null)"; then
       pass "queue ${name} exists (${url//$'\r'/})"
@@ -83,7 +84,7 @@ done
 # Poison-message drill on the payment queue: receive it 5 times without deleting it
 # (visibility timeout 0 makes it visible again at once); the next receive moves it to the DLQ.
 payment_queue="${QUEUES[1]}"
-payment_dlq="${payment_queue%-queue}-dlq"
+payment_dlq="${payment_queue}-dlq"
 payment_queue_url="$(sqs get-queue-url --queue-name "${payment_queue}" --query QueueUrl --output text | tr -d '\r')"
 payment_dlq_url="$(sqs get-queue-url --queue-name "${payment_dlq}" --query QueueUrl --output text | tr -d '\r')"
 sqs send-message --queue-url "${payment_queue_url}" --message-body '{"poison":true}' >/dev/null

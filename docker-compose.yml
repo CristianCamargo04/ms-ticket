@@ -42,8 +42,10 @@ x-app-environment: &app-environment
   AWS_SQSENDPOINT: http://localstack:4566
   AWS_ENDPOINT_URL_DYNAMODB: http://dynamodb-local:8000
   AWS_ENDPOINT_URL_SQS: http://localstack:4566
-  AWS_SQS_ORDERRESERVATIONQUEUE: ${SQS_ORDER_RESERVATION_QUEUE:-order-reservation-queue}
-  AWS_SQS_ORDERPAYMENTQUEUE: ${SQS_ORDER_PAYMENT_QUEUE:-order-payment-queue}
+  # Same values as the application defaults aws.sqs.order-reservation-queue and
+  # aws.sqs.order-payment-queue; init-sqs.sh creates them plus "<queue>-dlq" for each.
+  AWS_SQS_ORDERRESERVATIONQUEUE: ${SQS_ORDER_RESERVATION_QUEUE:-ticketing-order-reservation}
+  AWS_SQS_ORDERPAYMENTQUEUE: ${SQS_ORDER_PAYMENT_QUEUE:-ticketing-order-payment}
   # JWT validation - the "issuer problem":
   #   Clients (scripts/infra/get-token.sh, Postman, k6) request tokens from the HOST at
   #   http://localhost:8090/default, and mock-oauth2-server derives "iss" from the URL it
@@ -65,9 +67,10 @@ x-app: &app
   init: true
   read_only: true
   tmpfs:
-    # The only writable path. "exec" is deliberate (Docker tmpfs defaults to noexec):
-    # Netty extracts its native epoll transport here before loading it, like an ECS task
-    # with a /tmp volume would. With noexec it silently degrades to the NIO transport.
+    # The only writable path; it replaces the image's VOLUME /tmp with a size-capped
+    # tmpfs. "exec" is deliberate (Docker tmpfs defaults to noexec): Netty extracts its
+    # native epoll transport here before loading it, like the ECS task does on the image's
+    # /tmp volume. With noexec it silently degrades to the NIO transport.
     - /tmp:rw,exec,nosuid,nodev,size=64m
   security_opt:
     - no-new-privileges:true
@@ -79,6 +82,8 @@ x-app: &app
   logging: *logging
   networks:
     - ticketing
+  # Probes GET /actuator/health/readiness on 8080: locally the actuator shares the HTTP
+  # port (management.server.port is only set in AWS), so the probe needs no override.
   healthcheck:
     test: ["CMD", "/usr/local/bin/healthcheck"]
     interval: 10s
@@ -149,8 +154,8 @@ services:
       SERVICES: sqs
       EAGER_SERVICE_LOADING: "1"
       DISABLE_EVENTS: "1"
-      SQS_ORDER_RESERVATION_QUEUE: ${SQS_ORDER_RESERVATION_QUEUE:-order-reservation-queue}
-      SQS_ORDER_PAYMENT_QUEUE: ${SQS_ORDER_PAYMENT_QUEUE:-order-payment-queue}
+      SQS_ORDER_RESERVATION_QUEUE: ${SQS_ORDER_RESERVATION_QUEUE:-ticketing-order-reservation}
+      SQS_ORDER_PAYMENT_QUEUE: ${SQS_ORDER_PAYMENT_QUEUE:-ticketing-order-payment}
     volumes:
       # READY hook: queues + DLQs + redrive policies (idempotent).
       - ./src/main/resources/scripts/localstack/init-sqs.sh:/etc/localstack/init/ready.d/10-init-sqs.sh:ro

@@ -14,7 +14,10 @@
 #   docker compose exec localstack /etc/localstack/init/ready.d/10-init-sqs.sh
 #
 # Queue names must match the aws.sqs.* defaults of the application
-# ("order-reservation-queue", "order-payment-queue"). DLQ = "<name minus -queue>-dlq".
+# (aws.sqs.order-reservation-queue = "ticketing-order-reservation",
+#  aws.sqs.order-payment-queue     = "ticketing-order-payment"). DLQ = "<queue>-dlq":
+#   ticketing-order-reservation -> ticketing-order-reservation-dlq
+#   ticketing-order-payment     -> ticketing-order-payment-dlq
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -25,8 +28,8 @@ readonly RECEIVE_WAIT_TIME_SECONDS="${SQS_RECEIVE_WAIT_TIME_SECONDS:-20}"
 readonly MESSAGE_RETENTION_SECONDS="${SQS_MESSAGE_RETENTION_SECONDS:-345600}" # 4 days
 readonly DLQ_RETENTION_SECONDS="${SQS_DLQ_RETENTION_SECONDS:-1209600}"        # 14 days (SQS max)
 readonly QUEUES=(
-  "${SQS_ORDER_RESERVATION_QUEUE:-order-reservation-queue}"
-  "${SQS_ORDER_PAYMENT_QUEUE:-order-payment-queue}"
+  "${SQS_ORDER_RESERVATION_QUEUE:-ticketing-order-reservation}"
+  "${SQS_ORDER_PAYMENT_QUEUE:-ticketing-order-payment}"
 )
 
 log() {
@@ -47,7 +50,7 @@ json_string() {
 }
 
 dlq_name_for() {
-  printf '%s-dlq' "${1%-queue}"
+  printf '%s-dlq' "$1"
 }
 
 # Creates the queue or, when it already exists, converges its attributes. Prints the queue URL.

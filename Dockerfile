@@ -69,6 +69,14 @@ RUN groupadd --system --gid "${APP_GID}" app \
     && useradd --system --uid "${APP_UID}" --gid app --no-create-home --home-dir /nonexistent \
        --shell /usr/sbin/nologin app
 
+# /tmp is the only path the application writes to (Netty extracts its native epoll
+# transport there, the JVM keeps hsperfdata/temp files there). Sticky world-writable
+# so UID 10001 can use it, and declared as a VOLUME so that with a read-only root
+# filesystem (ECS readonlyRootFilesystem, compose read_only) /tmp is still a writable,
+# exec-capable mount. Compose replaces it with a size-capped tmpfs at the same path.
+RUN mkdir -p /tmp && chmod 1777 /tmp
+VOLUME ["/tmp"]
+
 WORKDIR /app
 
 # Least volatile layer first. Files stay owned by root (read-only for the app user),

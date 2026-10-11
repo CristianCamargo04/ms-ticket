@@ -3,7 +3,7 @@
 # LocalStack healthcheck (mounted read-only by docker-compose.yml).
 #
 # "Healthy" means more than "the gateway answers": the READY init hooks must have
-# finished successfully AND every expected queue (main + DLQ) must exist. Services
+# finished successfully AND every expected queue (main + "<queue>-dlq") must exist. Services
 # that depend_on localstack with condition: service_healthy therefore never start
 # against a half-initialised broker.
 # -----------------------------------------------------------------------------
@@ -12,8 +12,8 @@ set -euo pipefail
 readonly ENDPOINT="http://localhost:4566"
 readonly REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 readonly QUEUES=(
-  "${SQS_ORDER_RESERVATION_QUEUE:-order-reservation-queue}"
-  "${SQS_ORDER_PAYMENT_QUEUE:-order-payment-queue}"
+  "${SQS_ORDER_RESERVATION_QUEUE:-ticketing-order-reservation}"
+  "${SQS_ORDER_PAYMENT_QUEUE:-ticketing-order-payment}"
 )
 
 init_state="$(curl -fsS --max-time 3 "${ENDPOINT}/_localstack/init/ready")"
@@ -28,7 +28,7 @@ fi
 
 queue_urls="$(awslocal --region "${REGION}" sqs list-queues --query 'QueueUrls[]' --output text | tr '\t' '\n')"
 for queue in "${QUEUES[@]}"; do
-  for name in "${queue}" "${queue%-queue}-dlq"; do
+  for name in "${queue}" "${queue}-dlq"; do
     if ! grep -Eq "/${name}\$" <<<"${queue_urls}"; then
       echo "queue ${name} does not exist" >&2
       exit 1
