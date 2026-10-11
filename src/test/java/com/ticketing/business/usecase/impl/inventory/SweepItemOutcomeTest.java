@@ -17,6 +17,7 @@ class SweepItemOutcomeTest {
         "FINALIZED,   1, 3, 3, 4",
         "REPUBLISHED, 1, 2, 4, 4",
         "FAILED,      1, 2, 3, 5",
+        "ABANDONED,   1, 2, 3, 5",
         "UNCHANGED,   1, 2, 3, 4"})
     void shouldIncrementTheMatchingCounter(SweepItemOutcome outcome, int released, int finalized, int republished,
                                            int failed) {

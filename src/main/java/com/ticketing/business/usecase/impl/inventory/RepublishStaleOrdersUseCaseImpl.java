@@ -12,6 +12,7 @@ import com.ticketing.enums.OrderProcessingStatusEnum;
 import com.ticketing.persistence.DistributedLockPersistence;
 import com.ticketing.persistence.OrderPersistence;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,12 +25,26 @@ import reactor.core.publisher.Mono;
  * still {@code QUEUED} after their dispatch deadline get their reservation message republished and their deadline moved
  * forward by {@link OrderPolicy#republishAfter()}. Republishing is safe because the reservation consumer is idempotent.
  * The run itself is the retry loop: a failed publication leaves the deadline due for the next run.
+ *
+ * <p>Retries are bounded: an order still queued {@value #MAX_DISPATCH_ROUNDS} republish delays after its creation is a
+ * poison order (its messages keep failing and end in the dead-letter queue), so instead of re-injecting it forever
+ * it is moved to {@code FAILED} with reason {@value #DISPATCH_EXHAUSTED} (counted as failed and logged as an ERROR for
+ * the operators). A republished order that left the queue meanwhile is counted as unchanged.
  */
 @Service
 public class RepublishStaleOrdersUseCaseImpl implements RepublishStaleOrdersUseCase {
 
     /** Lease name. */
     static final String LOCK_NAME = "order-dispatch-sweeper";
+
+    /**
+     * Republish delays ({@link OrderPolicy#republishAfter()}) after which a still-queued order is given up (10 minutes
+     * with the default 30 seconds).
+     */
+    static final int MAX_DISPATCH_ROUNDS = 20;
+
+    /** Reason recorded on an order given up after {@link #MAX_DISPATCH_ROUNDS}. */
+    static final String DISPATCH_EXHAUSTED = "DISPATCH_EXHAUSTED";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RepublishStaleOrdersUseCaseImpl.class);
 
@@ -38,6 +53,7 @@ public class RepublishStaleOrdersUseCaseImpl implements RepublishStaleOrdersUseC
     private final OrderPolicy orderPolicy;
     private final SweeperPolicy sweeperPolicy;
     private final LeasedSweep leasedSweep;
+    private final Duration maxDispatchAge;
     private final Clock clock;
 
     /**
@@ -58,6 +74,7 @@ public class RepublishStaleOrdersUseCaseImpl implements RepublishStaleOrdersUseC
         this.orderPolicy = orderPolicy;
         this.sweeperPolicy = sweeperPolicy;
         this.leasedSweep = new LeasedSweep(distributedLockPersistence, sweeperPolicy);
+        this.maxDispatchAge = orderPolicy.republishAfter().multipliedBy(MAX_DISPATCH_ROUNDS);
         this.clock = clock;
     }
 
@@ -70,7 +87,18 @@ public class RepublishStaleOrdersUseCaseImpl implements RepublishStaleOrdersUseC
             Instant now = clock.instant();
             return leasedSweep.run(LOCK_NAME, now, () -> Flux.defer(() -> orderPersistence.findDueOrders(
                             DeadlineTypeEnum.DISPATCH, now, sweeperPolicy.batchSize()))
-                    .flatMap(order -> republish(order, now), sweeperPolicy.concurrency()));
+                    .flatMap(order -> dispatch(order, now), sweeperPolicy.concurrency()));
+        });
+    }
+
+    private Mono<SweepItemOutcome> dispatch(OrderData order, Instant now) {
+        Mono<SweepItemOutcome> processing = now.isBefore(order.createdAt().plus(maxDispatchAge))
+                ? republish(order, now)
+                : giveUp(order, now);
+        return processing.onErrorResume(error -> {
+            LOGGER.warn("Dispatch sweep of order {} failed, it is retried on the next run: {}", order.orderId(),
+                    error.toString());
+            return Mono.just(SweepItemOutcome.FAILED);
         });
     }
 
@@ -80,14 +108,27 @@ public class RepublishStaleOrdersUseCaseImpl implements RepublishStaleOrdersUseC
                 .then(Mono.defer(() -> orderPersistence.rescheduleDeadline(order.orderId(),
                         OrderProcessingStatusEnum.QUEUED, orderPolicy.dispatchDeadline(now), now)))
                 .map(rescheduled -> {
-                    LOGGER.info("Reservation message of order {} republished (deadline moved: {})", order.orderId(),
-                            rescheduled);
+                    if (!rescheduled) {
+                        LOGGER.debug("Order {} left the queue meanwhile, republication was not needed",
+                                order.orderId());
+                        return SweepItemOutcome.UNCHANGED;
+                    }
+                    LOGGER.info("Reservation message of order {} republished", order.orderId());
                     return SweepItemOutcome.REPUBLISHED;
-                })
-                .onErrorResume(error -> {
-                    LOGGER.warn("Republication of order {} failed, it is retried on the next run: {}",
-                            order.orderId(), error.toString());
-                    return Mono.just(SweepItemOutcome.FAILED);
+                });
+    }
+
+    private Mono<SweepItemOutcome> giveUp(OrderData order, Instant now) {
+        return Mono.defer(() -> orderPersistence.transitionProcessingStatus(order.orderId(),
+                        OrderProcessingStatusEnum.QUEUED, OrderProcessingStatusEnum.FAILED, DISPATCH_EXHAUSTED, now))
+                .map(failed -> {
+                    if (!failed) {
+                        LOGGER.debug("Order {} left the queue meanwhile, nothing to give up", order.orderId());
+                        return SweepItemOutcome.UNCHANGED;
+                    }
+                    LOGGER.error("Order {} still queued {} after its creation, marked FAILED ({})", order.orderId(),
+                            maxDispatchAge, DISPATCH_EXHAUSTED);
+                    return SweepItemOutcome.ABANDONED;
                 });
     }
 }

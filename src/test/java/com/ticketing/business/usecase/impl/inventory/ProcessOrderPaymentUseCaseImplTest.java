@@ -13,6 +13,7 @@ import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.onSal
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.pendingOrder;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.reservedOrder;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.soldOrder;
+import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.timedOutPendingOrder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
@@ -49,6 +50,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
@@ -315,6 +317,59 @@ class ProcessOrderPaymentUseCaseImplTest {
                 .verifyComplete();
 
         verifyNoInteractions(eventPersistence, paymentGatewayChargeApi, inventoryTransactionPersistence);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("ordersPastTheirConfirmationDeadline")
+    void shouldNotChargeAnOrderWhoseConfirmationDeadlineIsDue(String state, OrderData order) {
+        when(orderPersistence.findById(ORDER_ID)).thenReturn(Mono.just(order));
+
+        StepVerifier.create(useCase().execute(REQUEST))
+                .expectNext(order)
+                .verifyComplete();
+
+        verifyNoInteractions(eventPersistence, paymentGatewayChargeApi, inventoryTransactionPersistence);
+        assertThat(logs.list).anySatisfy(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
+            assertThat(event.getFormattedMessage()).contains(ORDER_ID, "confirmation deadline");
+        });
+    }
+
+    static Stream<Arguments> ordersPastTheirConfirmationDeadline() {
+        return Stream.of(
+                Arguments.of("deadline passed", timedOutPendingOrder(ORDER_ID, 2)),
+                Arguments.of("deadline right now", pendingOrder(2).withDeadline(NOW, NOW.minusSeconds(1))));
+    }
+
+    @Test
+    void shouldChargeAnOrderPendingConfirmationOneMillisecondBeforeItsDeadline() {
+        OrderData pending = pendingOrder(2).withDeadline(NOW.plusMillis(1), NOW.minusSeconds(1));
+        givenPendingOrderOfAnEvent(pending);
+        when(paymentGatewayChargeApi.charge(any())).thenReturn(Mono.just(new PaymentOutcome.Approved("pay-1")));
+        when(inventoryTransactionPersistence.finalizeSale(any()))
+                .thenReturn(Mono.just(new InventoryWriteOutcome.Applied(pending.withSale("pay-1", NOW))));
+
+        StepVerifier.create(useCase().execute(REQUEST))
+                .assertNext(order -> assertThat(order.ticketStatus()).isEqualTo(TicketStatusEnum.SOLD))
+                .verifyComplete();
+
+        verify(paymentGatewayChargeApi).charge(any());
+    }
+
+    @Test
+    void shouldChargeAPendingOrderWithoutDeadline() {
+        OrderData pending = pendingOrder(2).withDeadline(null, NOW.minusSeconds(1));
+        givenPendingOrderOfAnEvent(pending);
+        when(paymentGatewayChargeApi.charge(any())).thenReturn(Mono.just(new PaymentOutcome.Declined("expired")));
+        when(inventoryTransactionPersistence.release(any())).thenReturn(Mono.just(new InventoryWriteOutcome.Applied(
+                pending.withRelease(OrderProcessingStatusEnum.PAYMENT_DECLINED, "PAYMENT_DECLINED", NOW))));
+
+        StepVerifier.create(useCase().execute(REQUEST))
+                .assertNext(order -> assertThat(order.processingStatus())
+                        .isEqualTo(OrderProcessingStatusEnum.PAYMENT_DECLINED))
+                .verifyComplete();
+
+        verify(paymentGatewayChargeApi).charge(any());
     }
 
     @Test

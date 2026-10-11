@@ -44,9 +44,12 @@ import com.ticketing.enums.TicketStatusEnum;
 import com.ticketing.persistence.EventPersistence;
 import com.ticketing.persistence.OrderPersistence;
 import java.util.function.Function;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
@@ -183,6 +186,31 @@ class QueuedOrderAdmissionTest {
                 .verify();
 
         verifyNoInteractions(sqsOrderQueueClient, eventCacheService);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("sameFingerprintForAnotherOrder")
+    void shouldRejectTheReuseOfAnIdempotencyKeyForAnotherOrderEvenWithTheSameFingerprint(String difference,
+                                                                                         Admission otherOrder) {
+        when(orderPersistence.findById(ORDER_ID)).thenReturn(Mono.just(queuedOrder(2)));
+
+        StepVerifier.create(admission().admit(otherOrder))
+                .expectError(IdempotencyKeyConflictException.class)
+                .verify();
+
+        verifyNoInteractions(sqsOrderQueueClient, eventCacheService);
+    }
+
+    static Stream<Arguments> sameFingerprintForAnotherOrder() {
+        return Stream.of(
+                Arguments.of("another beneficiary", new Admission(ORDER_ID, EVENT_ID, "beneficiary-2",
+                        OrderTypeEnum.STANDARD, 2, IDEMPOTENCY_KEY, REQUEST_HASH, CORRELATION_ID, true)),
+                Arguments.of("another event", new Admission(ORDER_ID, "other-event", CUSTOMER_ID,
+                        OrderTypeEnum.STANDARD, 2, IDEMPOTENCY_KEY, REQUEST_HASH, CORRELATION_ID, true)),
+                Arguments.of("another type", new Admission(ORDER_ID, EVENT_ID, CUSTOMER_ID,
+                        OrderTypeEnum.COMPLIMENTARY, 2, IDEMPOTENCY_KEY, REQUEST_HASH, CORRELATION_ID, false)),
+                Arguments.of("another quantity", new Admission(ORDER_ID, EVENT_ID, CUSTOMER_ID,
+                        OrderTypeEnum.STANDARD, 3, IDEMPOTENCY_KEY, REQUEST_HASH, CORRELATION_ID, true)));
     }
 
     @Test

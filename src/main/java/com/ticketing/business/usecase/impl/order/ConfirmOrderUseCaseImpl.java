@@ -19,6 +19,7 @@ import com.ticketing.domain.inventory.RetryPolicy;
 import com.ticketing.domain.order.OrderPolicy;
 import com.ticketing.enums.OrderProcessingStatusEnum;
 import com.ticketing.enums.TicketStatusEnum;
+import com.ticketing.enums.TransitionReasonEnum;
 import com.ticketing.persistence.InventoryTransactionPersistence;
 import com.ticketing.persistence.OrderPersistence;
 import com.ticketing.util.ReactiveRetryUtil;
@@ -35,12 +36,15 @@ import reactor.util.retry.RetryBackoffSpec;
  * (hold still valid, caller owns the order) and publishes the payment message.
  *
  * <p>Idempotent: an order already pending confirmation republishes its payment message (the gateway charge is
- * idempotent on the order id) and a sold order is returned as is. An order whose hold was released by the expiration
- * sweeper (processing status {@code EXPIRED}) is reported as {@link ReservationExpiredException}, also when the hold
- * instant has not passed yet on this instance's clock. When the transaction loses a race (concurrent confirmation, hold
- * expiration sweeper, cancellation) the order is reloaded to report the winner's outcome. A payment
- * message that cannot be published is only logged: the order stays pending, the customer may confirm again and the
- * payment reconciliation sweeper settles it after its confirmation deadline.
+ * idempotent on the order id) and a sold order is returned as is. Once the confirmation deadline of a pending order is
+ * due, the payment reconciliation sweeper owns it and nothing is republished (the payment worker would not charge it
+ * anyway). An order whose hold was released by the expiration sweeper ({@code EXPIRED} with reason
+ * {@code HOLD_EXPIRED}) is reported as {@link ReservationExpiredException}, like a hold that is over but not swept yet,
+ * so the answer does not depend on whether the sweeper already ran; any other order that is not active and reserved
+ * (including one expired by {@code CONFIRMATION_TIMEOUT}) is an {@link InvalidOrderStateException}. When the
+ * transaction loses a race (concurrent confirmation, hold expiration sweeper, cancellation) the order is reloaded to
+ * report the winner's outcome. A payment message that cannot be published is only logged: the order stays pending, the
+ * customer may confirm again and the payment reconciliation sweeper settles it after its confirmation deadline.
  */
 @Service
 public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
@@ -87,14 +91,23 @@ public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
                 .filter(order -> order.isOwnedBy(request.customerId()))
                 .switchIfEmpty(Mono.error(() -> new OrderNotFoundException(request.orderId())))
                 .flatMap(order -> switch (order.ticketStatus()) {
-                    case PENDING_CONFIRMATION -> publishPayment(order, request).thenReturn(order);
+                    case PENDING_CONFIRMATION -> alreadyConfirmed(order, request);
                     case SOLD -> Mono.just(order);
                     case AVAILABLE, RESERVED, COMPLIMENTARY -> confirmHold(order, request);
                 });
     }
 
+    private Mono<OrderData> alreadyConfirmed(OrderData order, ConfirmOrderRequest request) {
+        if (order.deadlineAt() != null && !clock.instant().isBefore(order.deadlineAt())) {
+            LOGGER.debug("Order {} is past its confirmation deadline, the payment reconciliation settles it",
+                    order.orderId());
+            return Mono.just(order);
+        }
+        return publishPayment(order, request).thenReturn(order);
+    }
+
     private Mono<OrderData> confirmHold(OrderData order, ConfirmOrderRequest request) {
-        if (order.processingStatus() == OrderProcessingStatusEnum.EXPIRED) {
+        if (isReleasedOnHoldExpiry(order)) {
             return Mono.error(new ReservationExpiredException(order.orderId()));
         }
         if (order.processingStatus() != OrderProcessingStatusEnum.ACTIVE
@@ -130,11 +143,20 @@ public class ConfirmOrderUseCaseImpl implements ConfirmOrderUseCase {
                 || current.ticketStatus() == TicketStatusEnum.SOLD) {
             return Mono.just(current);
         }
-        if (current.processingStatus() == OrderProcessingStatusEnum.EXPIRED || current.isHoldExpired(now)) {
+        if (isReleasedOnHoldExpiry(current) || current.isHoldExpired(now)) {
             return Mono.error(new ReservationExpiredException(current.orderId()));
         }
         return Mono.error(new InvalidOrderStateException(current.orderId(), "order is "
                 + current.processingStatus() + " with tickets " + current.ticketStatus() + " and cannot be confirmed"));
+    }
+
+    /**
+     * Whether the expiration sweeper released the hold of the order: the release transaction requires
+     * {@code holdExpiresAt <= now}, so the hold is over even if this instance's clock is slightly behind.
+     */
+    private static boolean isReleasedOnHoldExpiry(OrderData order) {
+        return order.processingStatus() == OrderProcessingStatusEnum.EXPIRED
+                && TransitionReasonEnum.HOLD_EXPIRED.name().equals(order.reason());
     }
 
     private Mono<OrderData> reload(String orderId) {

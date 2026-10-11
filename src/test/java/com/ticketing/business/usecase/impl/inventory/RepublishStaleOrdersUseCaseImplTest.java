@@ -1,9 +1,11 @@
 package com.ticketing.business.usecase.impl.inventory;
 
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.CLOCK;
+import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.CUSTOMER_ID;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.EVENT_ID;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.NOW;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.ORDER_POLICY;
+import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.REQUEST_HASH;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.SWEEPER_POLICY;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.queuedOrder;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,6 +28,8 @@ import com.ticketing.enums.OrderProcessingStatusEnum;
 import com.ticketing.enums.OrderTypeEnum;
 import com.ticketing.persistence.DistributedLockPersistence;
 import com.ticketing.persistence.OrderPersistence;
+import java.time.Duration;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -89,7 +93,8 @@ class RepublishStaleOrdersUseCaseImplTest {
                 });
 
         StepVerifier.create(useCase().execute())
-                .expectNext(new SweepResult(true, 0, 0, 2, 2))
+                .as("q-1 republished, q-2 left the queue meanwhile (unchanged), q-3 and q-4 failed")
+                .expectNext(new SweepResult(true, 0, 0, 1, 2))
                 .verifyComplete();
 
         lease.assertWasSubscribed();
@@ -98,6 +103,44 @@ class RepublishStaleOrdersUseCaseImplTest {
         verify(orderPersistence).rescheduleDeadline("q-1", OrderProcessingStatusEnum.QUEUED,
                 ORDER_POLICY.dispatchDeadline(NOW), NOW);
         verify(orderPersistence, never()).rescheduleDeadline(eq("q-3"), any(), any(), any());
+    }
+
+    @Test
+    void shouldGiveUpOrdersStillQueuedAfterTheMaximumDispatchRounds() {
+        Duration maxAge = ORDER_POLICY.republishAfter()
+                .multipliedBy(RepublishStaleOrdersUseCaseImpl.MAX_DISPATCH_ROUNDS);
+        PublisherProbe<Void> lease = givenLeaseAcquired();
+        when(orderPersistence.findDueOrders(DeadlineTypeEnum.DISPATCH, NOW, SWEEPER_POLICY.batchSize()))
+                .thenReturn(Flux.just(queuedSince("young", NOW.minus(maxAge).plusMillis(1)),
+                        queuedSince("poison", NOW.minus(maxAge)),
+                        queuedSince("reserved-meanwhile", NOW.minus(maxAge).minusSeconds(30)),
+                        queuedSince("throttled", NOW.minus(maxAge).minusSeconds(60))));
+        when(sqsOrderQueueClient.publishReservationRequested(any())).thenReturn(Mono.just("msg"));
+        when(orderPersistence.rescheduleDeadline(anyString(), any(), any(), any())).thenReturn(Mono.just(true));
+        when(orderPersistence.transitionProcessingStatus(anyString(), any(), any(), any(), any()))
+                .thenAnswer(invocation -> switch (invocation.<String>getArgument(0)) {
+                    case "reserved-meanwhile" -> Mono.just(false);
+                    case "throttled" -> Mono.error(new IllegalStateException("throttled"));
+                    default -> Mono.just(true);
+                });
+
+        StepVerifier.create(useCase().execute())
+                .as("young republished, poison given up and throttled failed (both counted as failed)")
+                .expectNext(new SweepResult(true, 0, 0, 1, 2))
+                .verifyComplete();
+
+        lease.assertWasSubscribed();
+        verify(sqsOrderQueueClient).publishReservationRequested(messages.capture());
+        assertThat(messages.getValue().orderId()).isEqualTo("young");
+        verify(orderPersistence).transitionProcessingStatus("poison", OrderProcessingStatusEnum.QUEUED,
+                OrderProcessingStatusEnum.FAILED, RepublishStaleOrdersUseCaseImpl.DISPATCH_EXHAUSTED, NOW);
+        verify(orderPersistence, never()).transitionProcessingStatus(eq("young"), any(), any(), any(), any());
+        verify(orderPersistence, never()).rescheduleDeadline(eq("poison"), any(), any(), any());
+    }
+
+    private static OrderData queuedSince(String orderId, Instant createdAt) {
+        return OrderData.newQueued(orderId, EVENT_ID, CUSTOMER_ID, OrderTypeEnum.STANDARD, 1, REQUEST_HASH,
+                ORDER_POLICY.dispatchDeadline(createdAt), createdAt);
     }
 
     @Test

@@ -45,9 +45,13 @@ import reactor.util.retry.RetryBackoffSpec;
  * <p>The charge uses the order id as gateway idempotency key, so redeliveries never charge twice. An approved charge
  * finalizes the sale ({@code PENDING_CONFIRMATION -> SOLD}); a declined one releases the tickets. The settlement write
  * is retried locally on transient conflicts (the money is already captured, so it must not wait for a redelivery);
- * gateway errors propagate so that SQS redelivers the message. If the order was released meanwhile by the payment
- * reconciliation sweeper while the charge was approved, an ERROR is logged for a manual refund (documented
- * limitation).
+ * gateway errors propagate so that SQS redelivers the message.
+ *
+ * <p>No charge is <em>started</em> once the confirmation deadline of the order ({@link OrderData#deadlineAt()}) is
+ * due: from that instant the payment reconciliation sweeper owns the order (it looks the charge up and finalizes or
+ * releases it), so a message redelivered late, e.g. after a gateway outage, is acknowledged without charging. Only a
+ * charge started before the deadline and completing after the sweeper's lookup can still meet a released order: then
+ * an ERROR is logged for a manual refund (documented limitation).
  */
 @Service
 public class ProcessOrderPaymentUseCaseImpl implements ProcessOrderPaymentUseCase {
@@ -101,11 +105,24 @@ public class ProcessOrderPaymentUseCaseImpl implements ProcessOrderPaymentUseCas
                                 order.ticketStatus());
                         return Mono.just(order);
                     }
+                    if (isConfirmationDeadlineDue(order, clock.instant())) {
+                        LOGGER.warn("Order {} reached its confirmation deadline before being charged, the payment"
+                                + " reconciliation settles it", orderId);
+                        return Mono.just(order);
+                    }
                     return Mono.defer(() -> eventPersistence.findById(order.eventId()))
                             .switchIfEmpty(Mono.error(() -> new EventNotFoundException(order.eventId())))
                             .flatMap(event -> paymentGatewayChargeApi.charge(chargeOf(order, event, request)))
                             .flatMap(outcome -> settle(order, outcome));
                 });
+    }
+
+    /**
+     * Whether the payment reconciliation sweeper owns the order, i.e. its confirmation deadline is due at {@code now}
+     * (same boundary as the deadline index query {@code deadlineAt <= now}).
+     */
+    private static boolean isConfirmationDeadlineDue(OrderData order, Instant now) {
+        return order.deadlineAt() != null && !now.isBefore(order.deadlineAt());
     }
 
     private static PaymentChargeRequest chargeOf(OrderData order, EventData event, ProcessOrderPaymentRequest request) {

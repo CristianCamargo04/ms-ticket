@@ -9,6 +9,7 @@ import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.PUBLI
 import static java.util.stream.Collectors.counting;
 import static java.util.stream.Collectors.groupingBy;
 import static java.util.stream.Collectors.toMap;
+import static java.util.stream.Collectors.toSet;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ticketing.business.usecase.impl.order.ConfirmOrderUseCaseImpl;
@@ -32,8 +33,15 @@ import com.ticketing.domain.exception.ReservationExpiredException;
 import com.ticketing.domain.external_request.payment.PaymentChargeRequest;
 import com.ticketing.domain.internal_request.ConfirmOrderRequest;
 import com.ticketing.domain.internal_request.OrderReservationMessage;
+import com.ticketing.domain.internal_request.PaymentRequestedMessage;
 import com.ticketing.domain.internal_request.PlaceOrderRequest;
 import com.ticketing.domain.internal_request.ReserveTicketsRequest;
+import com.ticketing.domain.inventory.ConfirmInventoryCommand;
+import com.ticketing.domain.inventory.FinalizeSaleCommand;
+import com.ticketing.domain.inventory.InventoryWriteOutcome;
+import com.ticketing.domain.inventory.IssueComplimentaryCommand;
+import com.ticketing.domain.inventory.ReleaseInventoryCommand;
+import com.ticketing.domain.inventory.ReserveInventoryCommand;
 import com.ticketing.domain.inventory.RetryPolicy;
 import com.ticketing.domain.inventory.SweeperPolicy;
 import com.ticketing.domain.order.PaymentOutcome;
@@ -43,6 +51,7 @@ import com.ticketing.enums.OrderProcessingStatusEnum;
 import com.ticketing.enums.OrderTypeEnum;
 import com.ticketing.enums.TicketStatusEnum;
 import com.ticketing.enums.TransitionReasonEnum;
+import com.ticketing.persistence.InventoryTransactionPersistence;
 import com.ticketing.persistence.OrderPersistence;
 import com.ticketing.util.DeterministicIdUtil;
 import java.time.Clock;
@@ -51,7 +60,10 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.random.RandomGenerator;
 import java.util.stream.IntStream;
@@ -60,6 +72,7 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
@@ -195,6 +208,10 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
         assertThat(store.transitions()).hasSize(3);
     }
 
+    /**
+     * Free-running race: the invariants must hold whatever the interleaving, but the scheduler decides who wins (the
+     * confirmations usually do), so both arbitration outcomes are forced by the next test.
+     */
     @RepeatedTest(10)
     void shouldLetExactlyOneOfConfirmationAndExpirationWinAtTheHoldBoundary() {
         Instant holdEnd = NOW;
@@ -253,6 +270,73 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
             assertThat(transitions.get(1).reason()).isIn(TransitionReasonEnum.CUSTOMER_CONFIRMATION,
                     TransitionReasonEnum.HOLD_EXPIRED);
         });
+        assertThat(locks.isHeld(ReleaseExpiredReservationsUseCaseImpl.LOCK_NAME)).as("lease released").isFalse();
+    }
+
+    /**
+     * Contested race with both outcomes forced: every confirmation reads the still reserved order, then for half of
+     * the orders the sweeper's release commits between that read and the confirmation's conditional write (the
+     * expiration wins), and for the other half the confirmation commits before the sweeper's release, which carries a
+     * stale snapshot from the lagging deadline index (the confirmation wins).
+     */
+    @RepeatedTest(3)
+    void shouldArbitrateBothOutcomesOfAContestedConfirmationAndExpiration() {
+        Instant holdEnd = NOW;
+        List<OrderData> reserved = reserveFiftyOrdersOfTwoTicketsHeldUntil(holdEnd);
+        Set<String> expirationWins = IntStream.range(0, reserved.size()).filter(i -> i % 2 == 0)
+                .mapToObj(i -> reserved.get(i).orderId()).collect(toSet());
+        Set<String> confirmationWins = reserved.stream().map(OrderData::orderId)
+                .filter(orderId -> !expirationWins.contains(orderId)).collect(toSet());
+        InterleavedInventory inventory = new InterleavedInventory(inventoryPersistence, expirationWins);
+        ConfirmOrderUseCaseImpl confirmOrder = new ConfirmOrderUseCaseImpl(orderPersistence, inventory, queueClient,
+                ORDER_POLICY, PUBLISH_RETRY_POLICY, Clock.fixed(holdEnd.minusMillis(1), ZoneOffset.UTC));
+        InMemoryDistributedLockPersistence locks = new InMemoryDistributedLockPersistence(store);
+        ReleaseExpiredReservationsUseCaseImpl sweeper = new ReleaseExpiredReservationsUseCaseImpl(locks,
+                new LaggingDeadlineIndex(orderPersistence, reserved), inventory, new NoChargesGateway(),
+                new SweeperPolicy(Duration.ofSeconds(30), 100, 8, "sweeper-1"), Clock.fixed(holdEnd, ZoneOffset.UTC));
+        int appliedBefore = inventoryPersistence.appliedCount();
+        int conflictsBefore = inventoryPersistence.orderStateChangedCount();
+
+        Mono<Map<String, Object>> confirmations = Flux.fromIterable(reserved)
+                .flatMap(order -> confirmOrder.execute(new ConfirmOrderRequest(order.orderId(), order.customerId(),
+                                "tok_1", "corr"))
+                        .<Object>map(Function.identity())
+                        .onErrorResume(Mono::just)
+                        .map(outcome -> Map.entry(order.orderId(), outcome))
+                        .subscribeOn(Schedulers.parallel()))
+                .collectMap(Map.Entry::getKey, Map.Entry::getValue);
+
+        StepVerifier.create(Mono.zip(confirmations, sweeper.execute().subscribeOn(Schedulers.parallel())))
+                .assertNext(race -> {
+                    Map<String, Object> outcomes = race.getT1();
+                    assertThat(confirmationWins).isNotEmpty().allSatisfy(orderId -> {
+                        assertThat(outcomes.get(orderId)).isInstanceOfSatisfying(OrderData.class, order ->
+                                assertThat(order.ticketStatus()).isEqualTo(TicketStatusEnum.PENDING_CONFIRMATION));
+                        assertOrderHolds(orderId, TicketStatusEnum.PENDING_CONFIRMATION,
+                                OrderProcessingStatusEnum.ACTIVE);
+                    });
+                    assertThat(expirationWins).isNotEmpty().allSatisfy(orderId -> {
+                        assertThat(outcomes.get(orderId)).isInstanceOf(ReservationExpiredException.class);
+                        OrderData order = store.order(orderId);
+                        assertThat(order.processingStatus()).isEqualTo(OrderProcessingStatusEnum.EXPIRED);
+                        assertThat(order.ticketStatus()).isEqualTo(TicketStatusEnum.AVAILABLE);
+                        assertThat(order.reason()).isEqualTo(TransitionReasonEnum.HOLD_EXPIRED.name());
+                    });
+                    assertThat(race.getT2()).isEqualTo(new SweepResult(true, expirationWins.size(), 0, 0, 0));
+                })
+                .expectComplete()
+                .verify(TIMEOUT);
+
+        assertThat(inventory.contestedWrites()).as("every write met its competitor").isEqualTo(reserved.size());
+        assertThat(inventoryPersistence.appliedCount() - appliedBefore).as("one winner per order")
+                .isEqualTo(reserved.size());
+        assertThat(inventoryPersistence.orderStateChangedCount() - conflictsBefore)
+                .as("one loser per order, rejected by the conditional write").isEqualTo(reserved.size());
+        assertCountersMatchTickets(CAPACITY, 2 * expirationWins.size(), 0, 2 * confirmationWins.size());
+        assertThat(queueClient.paymentMessages()).extracting(PaymentRequestedMessage::orderId)
+                .containsExactlyInAnyOrderElementsOf(confirmationWins);
+        assertThat(store.transitions().stream().collect(groupingBy(TicketTransitionData::ticketId)))
+                .hasSize(CAPACITY).allSatisfy((ticketId, transitions) -> assertThat(transitions).hasSize(2));
         assertThat(locks.isHeld(ReleaseExpiredReservationsUseCaseImpl.LOCK_NAME)).as("lease released").isFalse();
     }
 
@@ -407,6 +491,84 @@ class ReserveTicketsUseCaseImplConcurrencyTest {
         public Mono<Boolean> rescheduleDeadline(String orderId, OrderProcessingStatusEnum expected,
                                                Instant deadlineAt, Instant now) {
             return delegate.rescheduleDeadline(orderId, expected, deadlineAt, now);
+        }
+    }
+
+    /**
+     * Sequences the two competing writes of each order without blocking any thread. For an order whose expiration must
+     * win, the sweeper's release waits until the confirmation has read the order and reached its write, and the
+     * confirmation's write waits until the release has committed. For the other orders the sweeper's release waits
+     * until the confirmation has committed.
+     */
+    private static final class InterleavedInventory implements InventoryTransactionPersistence {
+
+        private final InventoryTransactionPersistence delegate;
+        private final Set<String> expirationWins;
+        private final Map<String, Sinks.Empty<Void>> confirmationReady = new ConcurrentHashMap<>();
+        private final Map<String, Sinks.Empty<Void>> confirmationDone = new ConcurrentHashMap<>();
+        private final Map<String, Sinks.Empty<Void>> releaseDone = new ConcurrentHashMap<>();
+        private final AtomicInteger contestedWrites = new AtomicInteger();
+
+        private InterleavedInventory(InventoryTransactionPersistence delegate, Set<String> expirationWins) {
+            this.delegate = delegate;
+            this.expirationWins = Set.copyOf(expirationWins);
+        }
+
+        int contestedWrites() {
+            return contestedWrites.get();
+        }
+
+        private static Sinks.Empty<Void> gate(Map<String, Sinks.Empty<Void>> gates, String orderId) {
+            return gates.computeIfAbsent(orderId, id -> Sinks.empty());
+        }
+
+        private static void open(Map<String, Sinks.Empty<Void>> gates, String orderId) {
+            gate(gates, orderId).emitEmpty(Sinks.EmitFailureHandler.FAIL_FAST);
+        }
+
+        private <T> Mono<T> after(Map<String, Sinks.Empty<Void>> gates, String orderId, Mono<T> write) {
+            return gate(gates, orderId).asMono()
+                    .then(Mono.defer(() -> {
+                        contestedWrites.incrementAndGet();
+                        return write;
+                    }));
+        }
+
+        @Override
+        public Mono<InventoryWriteOutcome> confirm(ConfirmInventoryCommand command) {
+            String orderId = command.order().orderId();
+            if (expirationWins.contains(orderId)) {
+                return Mono.fromRunnable(() -> open(confirmationReady, orderId))
+                        .then(after(releaseDone, orderId, Mono.defer(() -> delegate.confirm(command))));
+            }
+            return Mono.defer(() -> delegate.confirm(command))
+                    .doFinally(signal -> open(confirmationDone, orderId));
+        }
+
+        @Override
+        public Mono<InventoryWriteOutcome> release(ReleaseInventoryCommand command) {
+            String orderId = command.order().orderId();
+            if (expirationWins.contains(orderId)) {
+                return gate(confirmationReady, orderId).asMono()
+                        .then(Mono.defer(() -> delegate.release(command)))
+                        .doFinally(signal -> open(releaseDone, orderId));
+            }
+            return after(confirmationDone, orderId, Mono.defer(() -> delegate.release(command)));
+        }
+
+        @Override
+        public Mono<InventoryWriteOutcome> reserve(ReserveInventoryCommand command) {
+            return delegate.reserve(command);
+        }
+
+        @Override
+        public Mono<InventoryWriteOutcome> issueComplimentary(IssueComplimentaryCommand command) {
+            return delegate.issueComplimentary(command);
+        }
+
+        @Override
+        public Mono<InventoryWriteOutcome> finalizeSale(FinalizeSaleCommand command) {
+            return delegate.finalizeSale(command);
         }
     }
 

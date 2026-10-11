@@ -3,6 +3,7 @@ package com.ticketing.business.usecase.impl.order;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.CLOCK;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.CORRELATION_ID;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.EVENT_ID;
+import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.NOW;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.ORDER_POLICY;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.PUBLISH_RETRY_POLICY;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.REQUEST_HASH;
@@ -16,8 +17,10 @@ import static org.mockito.Mockito.when;
 
 import com.ticketing.cache.EventCacheService;
 import com.ticketing.client.sdk.SqsOrderQueueClient;
+import com.ticketing.domain.data.OrderData;
 import com.ticketing.domain.exception.DomainValidationException;
 import com.ticketing.domain.exception.EventNotOnSaleException;
+import com.ticketing.domain.exception.IdempotencyKeyConflictException;
 import com.ticketing.domain.internal_request.IssueComplimentaryRequest;
 import com.ticketing.enums.EventStatusEnum;
 import com.ticketing.enums.OrderProcessingStatusEnum;
@@ -81,6 +84,20 @@ class IssueComplimentaryTicketsUseCaseImplTest {
                     assertThat(order.processingStatus()).isEqualTo(OrderProcessingStatusEnum.QUEUED);
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    void shouldRejectAKeyReusedForAnotherBeneficiaryEvenWithTheSameFingerprint() {
+        OrderData firstIssue = OrderData.newQueued(EXPECTED_ORDER_ID, EVENT_ID, BENEFICIARY_ID,
+                OrderTypeEnum.COMPLIMENTARY, 2, REQUEST_HASH, NOW, NOW);
+        when(orderPersistence.findById(EXPECTED_ORDER_ID)).thenReturn(Mono.just(firstIssue));
+
+        StepVerifier.create(useCase().execute(new IssueComplimentaryRequest(EVENT_ID, "vip-2", 2, ADMIN_ID,
+                        IDEMPOTENCY_KEY, REQUEST_HASH, CORRELATION_ID)))
+                .expectError(IdempotencyKeyConflictException.class)
+                .verify();
+
+        verifyNoInteractions(eventCacheService, sqsOrderQueueClient);
     }
 
     @Test

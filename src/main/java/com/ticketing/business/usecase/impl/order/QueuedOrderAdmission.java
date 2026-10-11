@@ -29,8 +29,8 @@ import reactor.util.retry.RetryBackoffSpec;
  * path: it never touches the inventory).
  *
  * <ol>
- *     <li>An order with the same deterministic id is replayed: the same request fingerprint returns it (republishing
- *     its reservation message while it is still queued), another fingerprint is an
+ *     <li>An order with the same deterministic id is replayed: the same request (fingerprint, event, owner, type and
+ *     quantity) returns it (republishing its reservation message while it is still queued), any difference is an
  *     {@link IdempotencyKeyConflictException}.</li>
  *     <li>Otherwise the event is read through the cache: missing, not on sale or (optionally) sold out are rejected.</li>
  *     <li>The order is inserted with {@code attribute_not_exists}; losing that race to a concurrent duplicate request
@@ -136,13 +136,26 @@ final class QueuedOrderAdmission {
     }
 
     private Mono<OrderData> replay(OrderData existing, Admission admission) {
-        if (!existing.matchesRequest(admission.requestHash())) {
+        if (!isSameOrder(existing, admission)) {
             return Mono.error(new IdempotencyKeyConflictException(admission.idempotencyKey()));
         }
         if (existing.processingStatus() == OrderProcessingStatusEnum.QUEUED) {
             return publishReservation(existing, admission.correlationId()).thenReturn(existing);
         }
         return Mono.just(existing);
+    }
+
+    /**
+     * Idempotency payload check: the request fingerprint must match and, independently of how complete that
+     * fingerprint is, so must the identity of the order (event, owner or beneficiary, type and quantity), so that
+     * reusing a key for another order is never answered with the first one.
+     */
+    private static boolean isSameOrder(OrderData existing, Admission admission) {
+        return existing.matchesRequest(admission.requestHash())
+                && existing.eventId().equals(admission.eventId())
+                && existing.isOwnedBy(admission.customerId())
+                && existing.type() == admission.type()
+                && existing.quantity() == admission.quantity();
     }
 
     private Mono<Void> publishReservation(OrderData order, String correlationId) {

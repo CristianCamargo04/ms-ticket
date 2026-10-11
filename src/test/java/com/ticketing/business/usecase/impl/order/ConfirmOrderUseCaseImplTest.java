@@ -14,6 +14,7 @@ import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.queue
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.reservedOrder;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.soldOrder;
 import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.ticketIds;
+import static com.ticketing.business.usecase.impl.testing.BusinessFixtures.timedOutPendingOrder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
@@ -182,6 +183,37 @@ class ConfirmOrderUseCaseImplTest {
         verifyNoInteractions(inventoryTransactionPersistence);
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("pendingOrdersPastTheirConfirmationDeadline")
+    void shouldNotRepublishThePaymentOfAPendingOrderPastItsConfirmationDeadline(String state, OrderData pending) {
+        givenOrder(pending);
+
+        StepVerifier.create(useCase().execute(REQUEST))
+                .expectNext(pending)
+                .verifyComplete();
+
+        verifyNoInteractions(sqsOrderQueueClient, inventoryTransactionPersistence);
+    }
+
+    static Stream<Arguments> pendingOrdersPastTheirConfirmationDeadline() {
+        return Stream.of(
+                Arguments.of("deadline passed", timedOutPendingOrder(ORDER_ID, 2)),
+                Arguments.of("deadline right now", pendingOrder(2).withDeadline(NOW, NOW.minusSeconds(1))));
+    }
+
+    @Test
+    void shouldRepublishThePaymentOfAPendingOrderWithoutDeadline() {
+        OrderData pending = pendingOrder(2).withDeadline(null, NOW.minusSeconds(1));
+        givenOrder(pending);
+        when(sqsOrderQueueClient.publishPaymentRequested(any())).thenReturn(Mono.just("msg-1"));
+
+        StepVerifier.create(useCase().execute(REQUEST))
+                .expectNext(pending)
+                .verifyComplete();
+
+        verify(sqsOrderQueueClient).publishPaymentRequested(any());
+    }
+
     @Test
     void shouldReturnAPendingOrderEvenWhenItsPaymentCannotBeRepublished() {
         OrderData pending = pendingOrder(2);
@@ -250,7 +282,13 @@ class ConfirmOrderUseCaseImplTest {
                 Arguments.of("complimentary", queuedOrder(OrderTypeEnum.COMPLIMENTARY, 2)
                         .withComplimentaryIssued(ticketIds(2), NOW)),
                 Arguments.of("active without held tickets", reservedOrder(2)
-                        .withState(TicketStatusEnum.AVAILABLE, OrderProcessingStatusEnum.ACTIVE, NOW)));
+                        .withState(TicketStatusEnum.AVAILABLE, OrderProcessingStatusEnum.ACTIVE, NOW)),
+                Arguments.of("expired by confirmation timeout", pendingOrder(2)
+                        .withRelease(OrderProcessingStatusEnum.EXPIRED, "CONFIRMATION_TIMEOUT", NOW)),
+                Arguments.of("expired without reason", reservedOrder(2)
+                        .withRelease(OrderProcessingStatusEnum.EXPIRED, null, NOW)),
+                Arguments.of("payment declined", pendingOrder(2)
+                        .withRelease(OrderProcessingStatusEnum.PAYMENT_DECLINED, "PAYMENT_DECLINED", NOW)));
     }
 
     @Test
@@ -321,6 +359,20 @@ class ConfirmOrderUseCaseImplTest {
                 Arguments.of("released by the sweeper", reservedOrder(2)
                         .withRelease(OrderProcessingStatusEnum.EXPIRED, "HOLD_EXPIRED", NOW)),
                 Arguments.of("hold over", reservedOrder(2, NOW)));
+    }
+
+    @Test
+    void shouldRejectTheConfirmationWhenTheOrderExpiredByConfirmationTimeoutMeanwhile() {
+        OrderData reserved = reservedOrder(2);
+        OrderData timedOut = pendingOrder(2)
+                .withRelease(OrderProcessingStatusEnum.EXPIRED, "CONFIRMATION_TIMEOUT", NOW);
+        when(orderPersistence.findById(ORDER_ID)).thenReturn(Mono.just(reserved)).thenReturn(Mono.just(timedOut));
+        when(inventoryTransactionPersistence.confirm(any()))
+                .thenReturn(Mono.just(new InventoryWriteOutcome.OrderStateChanged()));
+
+        StepVerifier.create(useCase().execute(REQUEST))
+                .expectError(InvalidOrderStateException.class)
+                .verify();
     }
 
     @Test

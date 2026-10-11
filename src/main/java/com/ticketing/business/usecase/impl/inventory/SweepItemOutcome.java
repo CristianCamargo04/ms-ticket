@@ -20,7 +20,13 @@ enum SweepItemOutcome {
     UNCHANGED,
 
     /** Processing failed; the order stays due and is retried on the next run. */
-    FAILED;
+    FAILED,
+
+    /**
+     * The order was given up (moved to {@code FAILED} after exhausting its retries); counted as failed because it
+     * needs the attention of an operator.
+     */
+    ABANDONED;
 
     /**
      * Adds this outcome to the counters of a run.
@@ -36,7 +42,7 @@ enum SweepItemOutcome {
                     result.republished(), result.failed());
             case REPUBLISHED -> new SweepResult(result.lockAcquired(), result.released(), result.finalized(),
                     result.republished() + 1, result.failed());
-            case FAILED -> new SweepResult(result.lockAcquired(), result.released(), result.finalized(),
+            case FAILED, ABANDONED -> new SweepResult(result.lockAcquired(), result.released(), result.finalized(),
                     result.republished(), result.failed() + 1);
             case UNCHANGED -> result;
         };
