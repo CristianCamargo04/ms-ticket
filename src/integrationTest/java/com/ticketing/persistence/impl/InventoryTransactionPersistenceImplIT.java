@@ -171,6 +171,30 @@ class InventoryTransactionPersistenceImplIT {
         assertCounters(event, 3, 0, 0, 0, 1);
     }
 
+    /**
+     * {@code Clock.systemUTC()} has sub-millisecond precision while the table stores epoch milliseconds: the
+     * {@code Applied} order must still equal a later read.
+     */
+    @Test
+    void shouldReturnTheStoredStateForSubMillisecondCommandInstants() {
+        EventData event = context.onSaleEventWithTickets(2);
+        OrderData order = context.queuedOrder(event.eventId(), OrderTypeEnum.STANDARD, 1);
+        Instant reservedAt = PersistenceTestContext.now().plusNanos(123_456);
+
+        InventoryWriteOutcome reservation = reserve(order, List.of("T-000001"), reservedAt);
+
+        assertThat(reservation).isInstanceOf(InventoryWriteOutcome.Applied.class);
+        OrderData reserved = ((InventoryWriteOutcome.Applied) reservation).order();
+        assertThat(reserved).isEqualTo(context.order(order.orderId()));
+        Instant confirmedAt = reservedAt.plusSeconds(1).plusNanos(654_321);
+
+        InventoryWriteOutcome confirmation = context.inventory().confirm(new ConfirmInventoryCommand(reserved,
+                confirmedAt.plus(Duration.ofMinutes(5)), confirmedAt, reserved.customerId())).block(TIMEOUT);
+
+        assertThat(confirmation).isInstanceOf(InventoryWriteOutcome.Applied.class);
+        assertThat(((InventoryWriteOutcome.Applied) confirmation).order()).isEqualTo(context.order(order.orderId()));
+    }
+
     @Test
     void shouldConfirmAReservedOrder() {
         EventData event = context.onSaleEventWithTickets(3);

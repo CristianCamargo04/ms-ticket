@@ -2,6 +2,7 @@ package com.ticketing.persistence.impl;
 
 import static com.ticketing.persistence.impl.support.DynamoAttributes.epochMillis;
 import static com.ticketing.persistence.impl.support.DynamoAttributes.number;
+import static com.ticketing.persistence.impl.support.DynamoAttributes.storedPrecision;
 import static com.ticketing.persistence.impl.support.DynamoAttributes.string;
 import static com.ticketing.persistence.impl.support.DynamoAttributes.stringList;
 
@@ -55,7 +56,9 @@ import software.amazon.awssdk.services.dynamodb.model.Update;
  *
  * <p>On commit the outcome is {@link InventoryWriteOutcome.Applied} with the caller's order updated in memory through
  * the matching {@code OrderData.with*} method (exactly what was persisted, {@code version + 1}), so callers need no
- * extra read. Failures are translated by {@link TransactionCancellationTranslator}.
+ * extra read. The command instants are applied with the storage precision (epoch milliseconds, see
+ * {@code DynamoAttributes.storedPrecision}), so the returned order equals a later read of the same item. Failures are
+ * translated by {@link TransactionCancellationTranslator}.
  */
 @Repository
 public class InventoryTransactionPersistenceImpl implements InventoryTransactionPersistence {
@@ -113,7 +116,8 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
                                 ":deadlinePartition", string(partitioner.partitionOf(
                                         DeadlineTypeEnum.HOLD_EXPIRATION, order.orderId())),
                                 ":expectedProcessingStatus", string(OrderProcessingStatusEnum.QUEUED.name()))),
-                () -> order.withReservation(command.ticketIds(), command.holdExpiresAt(), command.now()));
+                () -> order.withReservation(command.ticketIds(), storedPrecision(command.holdExpiresAt()),
+                        storedPrecision(command.now())));
     }
 
     @Override
@@ -131,7 +135,7 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
                                 ":processingStatus", string(OrderProcessingStatusEnum.COMPLETED.name()),
                                 ":ticketIds", stringList(command.ticketIds()),
                                 ":expectedProcessingStatus", string(OrderProcessingStatusEnum.QUEUED.name()))),
-                () -> order.withComplimentaryIssued(command.ticketIds(), command.now()));
+                () -> order.withComplimentaryIssued(command.ticketIds(), storedPrecision(command.now())));
     }
 
     @Override
@@ -152,7 +156,8 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
                                 ":expectedTicketStatus", string(TicketStatusEnum.RESERVED.name()),
                                 ":expectedProcessingStatus", string(OrderProcessingStatusEnum.ACTIVE.name()),
                                 ":customerId", string(command.actor()))),
-                () -> order.withPendingConfirmation(command.confirmationDeadline(), command.now()));
+                () -> order.withPendingConfirmation(storedPrecision(command.confirmationDeadline()),
+                        storedPrecision(command.now())));
     }
 
     @Override
@@ -171,7 +176,7 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
                                 ":paymentReference", string(command.paymentReference()),
                                 ":expectedTicketStatus", string(TicketStatusEnum.PENDING_CONFIRMATION.name()),
                                 ":expectedProcessingStatus", string(OrderProcessingStatusEnum.ACTIVE.name()))),
-                () -> order.withSale(command.paymentReference(), command.now()));
+                () -> order.withSale(command.paymentReference(), storedPrecision(command.now())));
     }
 
     /**
@@ -204,7 +209,8 @@ public class InventoryTransactionPersistenceImpl implements InventoryTransaction
                                 ":reason", string(command.reason().name()),
                                 ":expectedTicketStatus", string(command.expectedStatus().name()),
                                 ":expectedProcessingStatus", string(OrderProcessingStatusEnum.ACTIVE.name()))),
-                () -> order.withRelease(command.resultingStatus(), command.reason().name(), command.now()));
+                () -> order.withRelease(command.resultingStatus(), command.reason().name(),
+                        storedPrecision(command.now())));
     }
 
     /**

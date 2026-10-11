@@ -4,9 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ticketing.domain.exception.InventoryConflictException;
 import com.ticketing.domain.inventory.InventoryWriteOutcome;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,10 +18,14 @@ import org.junit.jupiter.params.provider.MethodSource;
 import reactor.test.StepVerifier;
 import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.core.exception.ApiCallAttemptTimeoutException;
 import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
+import software.amazon.awssdk.core.exception.NonRetryableException;
+import software.amazon.awssdk.core.exception.RetryableException;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.dynamodb.model.CancellationReason;
 import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
+import software.amazon.awssdk.services.dynamodb.model.IdempotentParameterMismatchException;
 import software.amazon.awssdk.services.dynamodb.model.ProvisionedThroughputExceededException;
 import software.amazon.awssdk.services.dynamodb.model.RequestLimitExceededException;
 import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledException;
@@ -45,7 +52,11 @@ class TransactionCancellationTranslatorTest {
                 Arguments.of(codes(NONE, NONE, FAILED, NONE, NONE, NONE),
                         InventoryWriteOutcome.StaleTicketSelection.class),
                 Arguments.of(codes(NONE, FAILED, "TransactionConflict", NONE, NONE, NONE),
-                        InventoryWriteOutcome.StaleTicketSelection.class));
+                        InventoryWriteOutcome.StaleTicketSelection.class),
+                Arguments.of(codes(null, FAILED, NONE, null, NONE, NONE),
+                        InventoryWriteOutcome.StaleTicketSelection.class),
+                Arguments.of(codes(null, NONE, NONE, FAILED, null, null),
+                        InventoryWriteOutcome.OrderStateChanged.class));
     }
 
     @ParameterizedTest
@@ -80,6 +91,10 @@ class TransactionCancellationTranslatorTest {
                 codes(NONE, NONE, NONE, "RequestLimitExceeded", NONE, NONE),
                 codes(NONE, NONE, NONE, "InternalServerError", NONE, NONE),
                 codes(NONE, NONE, NONE, NONE, NONE, FAILED),
+                codes(null, NONE, NONE, NONE, "TransactionConflict", null),
+                codes(NONE, NONE, NONE, NONE, NONE, null),
+                codes(null, null, null, null, null, null),
+                codes(NONE, NONE, NONE, NONE, NONE, NONE),
                 List.of());
     }
 
@@ -89,6 +104,32 @@ class TransactionCancellationTranslatorTest {
 
         StepVerifier.create(TransactionCancellationTranslator.translate(canceled, TICKETS, "reserve"))
                 .expectErrorSatisfies(error -> assertThat(error).isSameAs(canceled))
+                .verify();
+    }
+
+    @Test
+    void shouldPropagateNonTransientCancellationsEvenWithReasonsWithoutCode() {
+        TransactionCanceledException canceled = canceled(codes(null, "ValidationError", NONE, null, NONE, NONE));
+
+        StepVerifier.create(TransactionCancellationTranslator.translate(canceled, TICKETS, "reserve"))
+                .expectErrorSatisfies(error -> assertThat(error).isSameAs(canceled))
+                .verify();
+    }
+
+    /** A reason without {@code Code} (null) must not crash the translation with a {@link NullPointerException}. */
+    @Test
+    void shouldTreatReasonsWithoutCodeAsNoReason() {
+        TransactionCanceledException canceled = TransactionCanceledException.builder()
+                .message("cancelled")
+                .cancellationReasons(CancellationReason.builder().code(NONE).build(),
+                        CancellationReason.builder().code(NONE).build(),
+                        CancellationReason.builder().code(NONE).build(),
+                        CancellationReason.builder().build())
+                .build();
+
+        StepVerifier.create(TransactionCancellationTranslator.translate(canceled, 1, "reserve of order o-1"))
+                .expectErrorSatisfies(error -> assertThat(error).isInstanceOf(InventoryConflictException.class)
+                        .hasCause(canceled))
                 .verify();
     }
 
@@ -142,6 +183,34 @@ class TransactionCancellationTranslatorTest {
                 .verify();
     }
 
+    /** A misconfiguration must surface as itself, never as a retryable inventory conflict. */
+    @Test
+    void shouldPropagateNonTransientClientFailuresUnchanged() {
+        SdkClientException credentials = SdkClientException.create(
+                "Unable to load credentials from any of the providers in the chain");
+
+        StepVerifier.create(TransactionCancellationTranslator.translate(new CompletionException(credentials),
+                        TICKETS, "reserve"))
+                .expectErrorSatisfies(error -> assertThat(error).isSameAs(credentials))
+                .verify();
+    }
+
+    /**
+     * The client request token is stable per command, so a reused token with other parameters is a programming error
+     * reported as is (not retried).
+     */
+    @Test
+    void shouldPropagateIdempotentParameterMismatchesUnchanged() {
+        IdempotentParameterMismatchException mismatch = IdempotentParameterMismatchException.builder()
+                .statusCode(400)
+                .message("token reused with other parameters")
+                .build();
+
+        StepVerifier.create(TransactionCancellationTranslator.translate(mismatch, TICKETS, "reserve"))
+                .expectErrorSatisfies(error -> assertThat(error).isSameAs(mismatch))
+                .verify();
+    }
+
     @Test
     void shouldClassifyTransientFailures() {
         assertThat(TransactionCancellationTranslator.isTransient(
@@ -155,11 +224,41 @@ class TransactionCancellationTranslatorTest {
         assertThat(TransactionCancellationTranslator.isTransient(serviceError("ThrottlingException", 400))).isTrue();
         assertThat(TransactionCancellationTranslator.isTransient(serviceError("InternalFailure", 500))).isTrue();
         assertThat(TransactionCancellationTranslator.isTransient(serviceError("ServiceUnavailable", 503))).isTrue();
-        assertThat(TransactionCancellationTranslator.isTransient(SdkClientException.create("connection reset")))
-                .isTrue();
         assertThat(TransactionCancellationTranslator.isTransient(serviceError("ValidationException", 400)))
                 .isFalse();
         assertThat(TransactionCancellationTranslator.isTransient(new IllegalArgumentException())).isFalse();
+    }
+
+    @Test
+    void shouldClassifyOnlyTimeoutsAndIoClientFailuresAsTransient() {
+        assertThat(TransactionCancellationTranslator.isTransient(ApiCallTimeoutException.create(1000))).isTrue();
+        assertThat(TransactionCancellationTranslator.isTransient(ApiCallAttemptTimeoutException.create(500)))
+                .isTrue();
+        assertThat(TransactionCancellationTranslator.isTransient(RetryableException.create("retry me"))).isTrue();
+        assertThat(TransactionCancellationTranslator.isTransient(SdkClientException.create(
+                "Unable to execute HTTP request", new IOException("Connection reset")))).isTrue();
+        assertThat(TransactionCancellationTranslator.isTransient(SdkClientException.create(
+                "Unable to execute HTTP request", new UncheckedIOException(new IOException("closed"))))).isTrue();
+        assertThat(TransactionCancellationTranslator.isTransient(SdkClientException.create(
+                "Unable to execute HTTP request", new Throwable("Acquire operation took longer",
+                        new TimeoutException("acquire"))))).isTrue();
+
+        assertThat(TransactionCancellationTranslator.isTransient(SdkClientException.create(
+                "Unable to load credentials from any of the providers in the chain"))).isFalse();
+        assertThat(TransactionCancellationTranslator.isTransient(SdkClientException.create(
+                "Unable to marshall request", new IllegalArgumentException("bad value")))).isFalse();
+        assertThat(TransactionCancellationTranslator.isTransient(NonRetryableException.create(
+                "do not retry", new IOException("io")))).isFalse();
+    }
+
+    @Test
+    void shouldStopWalkingCyclicCauseChains() {
+        RuntimeException first = new RuntimeException("first");
+        RuntimeException second = new RuntimeException("second", first);
+        first.initCause(second);
+
+        assertThat(TransactionCancellationTranslator.isTransient(SdkClientException.create("cyclic", first)))
+                .isFalse();
     }
 
     private static AwsServiceException serviceError(String code, int status) {

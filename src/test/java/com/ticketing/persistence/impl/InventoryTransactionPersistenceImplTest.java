@@ -21,6 +21,7 @@ import com.ticketing.domain.data.OrderData;
 import com.ticketing.domain.exception.InventoryConflictException;
 import com.ticketing.domain.inventory.ConfirmInventoryCommand;
 import com.ticketing.domain.inventory.FinalizeSaleCommand;
+import com.ticketing.domain.inventory.InventoryCommand;
 import com.ticketing.domain.inventory.InventoryWriteOutcome;
 import com.ticketing.domain.inventory.IssueComplimentaryCommand;
 import com.ticketing.domain.inventory.ReleaseInventoryCommand;
@@ -30,6 +31,7 @@ import com.ticketing.enums.OrderProcessingStatusEnum;
 import com.ticketing.enums.OrderTypeEnum;
 import com.ticketing.enums.TicketStatusEnum;
 import com.ticketing.enums.TransitionReasonEnum;
+import com.ticketing.persistence.impl.mapper.OrderEntityMapper;
 import com.ticketing.persistence.impl.mapper.TicketTransitionEntityMapper;
 import com.ticketing.persistence.impl.support.DeadlinePartitioner;
 import java.time.Duration;
@@ -66,6 +68,9 @@ class InventoryTransactionPersistenceImplTest {
     private static final AttributeValue NOW_MILLIS = millis(NOW);
     private static final AttributeValue ONE = AttributeValue.fromN("1");
     private static final Map<String, String> STATUS_NAME = Map.of("#status", "status");
+    /** What {@code Clock.systemUTC()} returns: finer than the millisecond precision of the stored numbers. */
+    private static final Instant PRECISE_NOW = Instant.parse("2026-10-10T12:00:00.123456789Z");
+    private static final Instant STORED_NOW = Instant.parse("2026-10-10T12:00:00.123Z");
 
     @Mock
     private DynamoDbAsyncClient dynamoDb;
@@ -268,6 +273,81 @@ class InventoryTransactionPersistenceImplTest {
                 ":now", NOW_MILLIS,
                 ":one", ONE));
         assertAuditRecords(request, expected, TicketStatusEnum.AVAILABLE, reason, "sweeper");
+    }
+
+    static Stream<Arguments> subMillisecondCommands() {
+        return Stream.of(
+                Arguments.of(new ReserveInventoryCommand(queuedOrder(OrderTypeEnum.STANDARD, 2), TICKETS,
+                        PRECISE_NOW.plus(Duration.ofMinutes(10)), PRECISE_NOW, "worker")),
+                Arguments.of(new IssueComplimentaryCommand(queuedOrder(OrderTypeEnum.COMPLIMENTARY, 2), TICKETS,
+                        PRECISE_NOW, "admin")),
+                Arguments.of(new ConfirmInventoryCommand(reservedOrder(TICKETS),
+                        PRECISE_NOW.plus(Duration.ofMinutes(5)), PRECISE_NOW, CUSTOMER_ID)),
+                Arguments.of(new FinalizeSaleCommand(pendingOrder(TICKETS), "pay-9", PRECISE_NOW,
+                        "payment-worker")),
+                Arguments.of(new ReleaseInventoryCommand(reservedOrder(TICKETS), TicketStatusEnum.RESERVED,
+                        OrderProcessingStatusEnum.EXPIRED, TransitionReasonEnum.HOLD_EXPIRED, PRECISE_NOW,
+                        "sweeper")));
+    }
+
+    /**
+     * The applied order is what a later read returns: every instant the transaction writes is stored as epoch
+     * milliseconds, so the in-memory result must not keep the sub-millisecond part of the command instants.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("subMillisecondCommands")
+    void shouldReturnTheAppliedOrderWithTheStoragePrecision(InventoryCommand command) {
+        committed();
+        OrderEntityMapper orderMapper = new OrderEntityMapper(partitioner);
+
+        StepVerifier.create(execute(command))
+                .assertNext(outcome -> {
+                    OrderData applied = ((InventoryWriteOutcome.Applied) outcome).order();
+                    assertThat(applied).isEqualTo(orderMapper.fromItem(orderMapper.toItem(applied)));
+                    assertThat(applied.updatedAt()).isEqualTo(STORED_NOW);
+                    assertThat(applied.version()).isEqualTo(command.order().version() + 1);
+                    if (applied.holdExpiresAt() != null) {
+                        assertThat(applied.holdExpiresAt().getNano() % 1_000_000).isZero();
+                    }
+                    if (applied.deadlineAt() != null) {
+                        assertThat(applied.deadlineAt().getNano() % 1_000_000).isZero();
+                    }
+                })
+                .verifyComplete();
+
+        TransactWriteItemsRequest request = capturedRequest();
+        assertThat(orderUpdate(request).expressionAttributeValues()).containsEntry(":now", millis(STORED_NOW));
+    }
+
+    @Test
+    void shouldApplyTheTruncatedHoldAndDeadlineInMemory() {
+        when(dynamoDb.transactWriteItems(any(TransactWriteItemsRequest.class)))
+                .thenReturn(completed(TransactWriteItemsResponse.builder().build()));
+        Instant preciseHold = PRECISE_NOW.plus(Duration.ofMinutes(10));
+        Instant preciseDeadline = PRECISE_NOW.plus(Duration.ofMinutes(5));
+        OrderData queued = queuedOrder(OrderTypeEnum.STANDARD, 2);
+        OrderData reserved = reservedOrder(TICKETS);
+
+        StepVerifier.create(persistence.reserve(new ReserveInventoryCommand(queued, TICKETS, preciseHold,
+                        PRECISE_NOW, "worker")))
+                .expectNext(new InventoryWriteOutcome.Applied(queued.withReservation(TICKETS,
+                        Instant.ofEpochMilli(preciseHold.toEpochMilli()), STORED_NOW)))
+                .verifyComplete();
+        StepVerifier.create(persistence.confirm(new ConfirmInventoryCommand(reserved, preciseDeadline, PRECISE_NOW,
+                        CUSTOMER_ID)))
+                .expectNext(new InventoryWriteOutcome.Applied(reserved.withPendingConfirmation(
+                        Instant.ofEpochMilli(preciseDeadline.toEpochMilli()), STORED_NOW)))
+                .verifyComplete();
+    }
+
+    private Mono<InventoryWriteOutcome> execute(InventoryCommand command) {
+        return switch (command) {
+            case ReserveInventoryCommand reserve -> persistence.reserve(reserve);
+            case IssueComplimentaryCommand complimentary -> persistence.issueComplimentary(complimentary);
+            case ConfirmInventoryCommand confirm -> persistence.confirm(confirm);
+            case FinalizeSaleCommand sale -> persistence.finalizeSale(sale);
+            case ReleaseInventoryCommand release -> persistence.release(release);
+        };
     }
 
     @Test

@@ -45,6 +45,18 @@ public final class DynamoAttributes {
     }
 
     /**
+     * An instant exactly as it reads back from storage: truncated to epoch milliseconds the same way
+     * {@link #epochMillis(Instant)} and {@link #toEpochMillis(Instant)} store it. Used to build in-memory results
+     * that must equal a later read ({@code Clock.systemUTC()} has micro- or nanosecond precision).
+     *
+     * @param instant the instant, never {@code null}
+     * @return the instant with millisecond precision
+     */
+    public static Instant storedPrecision(Instant instant) {
+        return Instant.ofEpochMilli(Objects.requireNonNull(instant, "instant").toEpochMilli());
+    }
+
+    /**
      * List attribute of strings.
      *
      * @param values the values, never {@code null}

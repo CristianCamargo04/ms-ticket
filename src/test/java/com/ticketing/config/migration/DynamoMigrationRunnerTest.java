@@ -3,12 +3,16 @@ package com.ticketing.config.migration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.ticketing.config.migration.MigrationChangelogReader.Migration;
+import com.ticketing.config.migration.TableDefinitionParser.TableDefinition;
 import com.ticketing.config.properties.AwsProperties;
 import java.time.Clock;
 import java.time.Duration;
@@ -22,7 +26,10 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.io.DefaultResourceLoader;
@@ -35,6 +42,9 @@ import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.CreateTableResponse;
 import software.amazon.awssdk.services.dynamodb.model.DescribeTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.DescribeTableResponse;
+import software.amazon.awssdk.services.dynamodb.model.DescribeTimeToLiveRequest;
+import software.amazon.awssdk.services.dynamodb.model.DescribeTimeToLiveResponse;
+import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.GlobalSecondaryIndexDescription;
@@ -50,6 +60,9 @@ import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanResponse;
 import software.amazon.awssdk.services.dynamodb.model.TableDescription;
 import software.amazon.awssdk.services.dynamodb.model.TableStatus;
+import software.amazon.awssdk.services.dynamodb.model.TimeToLiveDescription;
+import software.amazon.awssdk.services.dynamodb.model.TimeToLiveSpecification;
+import software.amazon.awssdk.services.dynamodb.model.TimeToLiveStatus;
 import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveRequest;
 import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveResponse;
 import software.amazon.awssdk.utils.builder.SdkBuilder;
@@ -64,6 +77,7 @@ class DynamoMigrationRunnerTest {
             MigrationChangelogReader.DEFAULT_CHANGELOG);
     private static final List<Migration> MIGRATIONS = READER.read();
     private static final List<String> IDS = MIGRATIONS.stream().map(Migration::id).toList();
+    private static final String TTL_ATTRIBUTE = "expiresAt";
 
     @Mock
     private DynamoDbAsyncClient dynamoDb;
@@ -81,6 +95,7 @@ class DynamoMigrationRunnerTest {
         when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(done(CreateTableResponse.builder()));
         tablesAreActive();
         history();
+        timeToLive(TimeToLiveStatus.DISABLED, null);
         when(dynamoDb.updateTimeToLive(any(UpdateTimeToLiveRequest.class)))
                 .thenReturn(done(UpdateTimeToLiveResponse.builder()));
         when(dynamoDb.putItem(any(PutItemRequest.class))).thenReturn(done(PutItemResponse.builder()));
@@ -99,10 +114,13 @@ class DynamoMigrationRunnerTest {
         assertThat(historyTable.attributeDefinitions().getFirst().attributeType()).isEqualTo(ScalarAttributeType.S);
         assertThat(historyTable.billingMode()).isEqualTo(BillingMode.PAY_PER_REQUEST);
 
+        ArgumentCaptor<DescribeTimeToLiveRequest> ttlStatus = ArgumentCaptor.forClass(DescribeTimeToLiveRequest.class);
+        verify(dynamoDb).describeTimeToLive(ttlStatus.capture());
+        assertThat(ttlStatus.getValue().tableName()).isEqualTo("p-locks");
         ArgumentCaptor<UpdateTimeToLiveRequest> ttl = ArgumentCaptor.forClass(UpdateTimeToLiveRequest.class);
         verify(dynamoDb).updateTimeToLive(ttl.capture());
         assertThat(ttl.getValue().tableName()).isEqualTo("p-locks");
-        assertThat(ttl.getValue().timeToLiveSpecification().attributeName()).isEqualTo("expiresAt");
+        assertThat(ttl.getValue().timeToLiveSpecification().attributeName()).isEqualTo(TTL_ATTRIBUTE);
         assertThat(ttl.getValue().timeToLiveSpecification().enabled()).isTrue();
 
         ArgumentCaptor<PutItemRequest> records = ArgumentCaptor.forClass(PutItemRequest.class);
@@ -160,17 +178,146 @@ class DynamoMigrationRunnerTest {
         StepVerifier.create(runner.migrate()).expectError(IllegalStateException.class).verify();
     }
 
-    @Test
-    void shouldSkipExistingTablesAndStillRecordTheirMigrations() {
+    @ParameterizedTest
+    @CsvSource({"ENABLED", "ENABLING"})
+    void shouldSkipExistingTablesWhoseTimeToLiveIsInPlaceAndStillRecordTheirMigrations(TimeToLiveStatus status) {
         when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(alreadyExists());
         tablesAreActive();
         history();
+        timeToLive(status, TTL_ATTRIBUTE);
         when(dynamoDb.putItem(any(PutItemRequest.class))).thenReturn(done(PutItemResponse.builder()));
 
         StepVerifier.create(runner.migrate()).expectNext(IDS).verifyComplete();
 
+        verify(dynamoDb).describeTimeToLive(any(DescribeTimeToLiveRequest.class));
         verify(dynamoDb, never()).updateTimeToLive(any(UpdateTimeToLiveRequest.class));
         verify(dynamoDb, times(5)).putItem(any(PutItemRequest.class));
+    }
+
+    /**
+     * A previous run crashed between {@code CreateTable} and {@code UpdateTimeToLive} (or the table was created
+     * outside the runner): the time to live must still be enabled, and before the migration is recorded.
+     */
+    @Test
+    void shouldEnableTheTimeToLiveOfAnExistingTableBeforeRecordingItsMigration() {
+        when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(alreadyExists());
+        tablesAreActive();
+        history();
+        timeToLive(TimeToLiveStatus.DISABLED, null);
+        when(dynamoDb.updateTimeToLive(any(UpdateTimeToLiveRequest.class)))
+                .thenReturn(done(UpdateTimeToLiveResponse.builder()));
+        when(dynamoDb.putItem(any(PutItemRequest.class))).thenReturn(done(PutItemResponse.builder()));
+
+        StepVerifier.create(runner.migrate()).expectNext(IDS).verifyComplete();
+
+        InOrder order = inOrder(dynamoDb);
+        order.verify(dynamoDb).putItem(argThat((PutItemRequest put) -> recordOf(put, IDS.get(3))));
+        order.verify(dynamoDb).describeTimeToLive(any(DescribeTimeToLiveRequest.class));
+        order.verify(dynamoDb).updateTimeToLive(any(UpdateTimeToLiveRequest.class));
+        order.verify(dynamoDb).putItem(argThat((PutItemRequest put) -> recordOf(put, IDS.getLast())));
+    }
+
+    @Test
+    void shouldTreatAMissingTimeToLiveDescriptionAsDisabled() {
+        when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(alreadyExists());
+        tablesAreActive();
+        history();
+        when(dynamoDb.describeTimeToLive(any(DescribeTimeToLiveRequest.class)))
+                .thenReturn(done(DescribeTimeToLiveResponse.builder()));
+        when(dynamoDb.updateTimeToLive(any(UpdateTimeToLiveRequest.class)))
+                .thenReturn(done(UpdateTimeToLiveResponse.builder()));
+        when(dynamoDb.putItem(any(PutItemRequest.class))).thenReturn(done(PutItemResponse.builder()));
+
+        StepVerifier.create(runner.migrate()).expectNext(IDS).verifyComplete();
+
+        verify(dynamoDb).updateTimeToLive(any(UpdateTimeToLiveRequest.class));
+    }
+
+    @Test
+    void shouldFailFastWhenAnotherTimeToLiveAttributeIsEnabled() {
+        when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(alreadyExists());
+        tablesAreActive();
+        history();
+        timeToLive(TimeToLiveStatus.ENABLED, "ttl");
+        when(dynamoDb.putItem(any(PutItemRequest.class))).thenReturn(done(PutItemResponse.builder()));
+
+        StepVerifier.create(runner.migrate())
+                .expectErrorSatisfies(error -> assertThat(error).isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("p-locks")
+                        .hasMessageContaining("ttl")
+                        .hasMessageContaining(TTL_ATTRIBUTE))
+                .verify();
+
+        verify(dynamoDb, never()).updateTimeToLive(any(UpdateTimeToLiveRequest.class));
+        verify(dynamoDb, times(4)).putItem(any(PutItemRequest.class));
+    }
+
+    @Test
+    void shouldAcceptATimeToLiveEnabledConcurrentlyByAnotherRunner() {
+        when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(alreadyExists());
+        tablesAreActive();
+        history();
+        when(dynamoDb.describeTimeToLive(any(DescribeTimeToLiveRequest.class)))
+                .thenReturn(timeToLiveDescribed(TimeToLiveStatus.DISABLED, null))
+                .thenReturn(timeToLiveDescribed(TimeToLiveStatus.ENABLED, TTL_ATTRIBUTE));
+        when(dynamoDb.updateTimeToLive(any(UpdateTimeToLiveRequest.class)))
+                .thenReturn(CompletableFuture.failedFuture(validationError("TimeToLive is already enabled")));
+        when(dynamoDb.putItem(any(PutItemRequest.class))).thenReturn(done(PutItemResponse.builder()));
+
+        StepVerifier.create(runner.migrate()).expectNext(IDS).verifyComplete();
+
+        verify(dynamoDb, times(2)).describeTimeToLive(any(DescribeTimeToLiveRequest.class));
+        verify(dynamoDb, times(5)).putItem(any(PutItemRequest.class));
+    }
+
+    @Test
+    void shouldNotRecordAMigrationWhoseTimeToLiveCannotBeEnabled() {
+        when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(alreadyExists());
+        tablesAreActive();
+        history();
+        timeToLive(TimeToLiveStatus.DISABLING, TTL_ATTRIBUTE);
+        DynamoDbException failure = validationError("Time to live has been modified multiple times");
+        when(dynamoDb.updateTimeToLive(any(UpdateTimeToLiveRequest.class)))
+                .thenReturn(CompletableFuture.failedFuture(failure));
+        when(dynamoDb.putItem(any(PutItemRequest.class))).thenReturn(done(PutItemResponse.builder()));
+
+        StepVerifier.create(runner.migrate())
+                .expectErrorSatisfies(error -> assertThat(error).isSameAs(failure))
+                .verify();
+
+        verify(dynamoDb, times(2)).describeTimeToLive(any(DescribeTimeToLiveRequest.class));
+        verify(dynamoDb, times(4)).putItem(any(PutItemRequest.class));
+    }
+
+    /** A declared {@code "Enabled": false} converges the other way: an enabled TTL is disabled, a disabled one kept. */
+    @ParameterizedTest
+    @CsvSource({"ENABLED, 1", "ENABLING, 1", "DISABLED, 0", "DISABLING, 0"})
+    void shouldConvergeADeclaredDisabledTimeToLive(TimeToLiveStatus current, int expectedUpdates) {
+        TableDefinitionParser parser = mock(TableDefinitionParser.class);
+        TimeToLiveSpecification disabled = TimeToLiveSpecification.builder()
+                .attributeName(TTL_ATTRIBUTE)
+                .enabled(false)
+                .build();
+        when(parser.parse(any())).thenReturn(new TableDefinition(
+                CreateTableRequest.builder().tableName("p-locks").build(), disabled));
+        DynamoMigrationRunner disabling = new DynamoMigrationRunner(dynamoDb, READER, parser, "p-migrations",
+                CLOCK, Duration.ofMillis(100), 3, Duration.ofSeconds(5));
+        when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(alreadyExists());
+        tablesAreActive();
+        history();
+        timeToLive(current, TTL_ATTRIBUTE);
+        if (expectedUpdates > 0) {
+            when(dynamoDb.updateTimeToLive(any(UpdateTimeToLiveRequest.class)))
+                    .thenReturn(done(UpdateTimeToLiveResponse.builder()));
+        }
+        when(dynamoDb.putItem(any(PutItemRequest.class))).thenReturn(done(PutItemResponse.builder()));
+
+        StepVerifier.create(disabling.migrate()).expectNext(IDS).verifyComplete();
+
+        ArgumentCaptor<UpdateTimeToLiveRequest> updates = ArgumentCaptor.forClass(UpdateTimeToLiveRequest.class);
+        verify(dynamoDb, times(expectedUpdates * IDS.size())).updateTimeToLive(updates.capture());
+        assertThat(updates.getAllValues()).allSatisfy(update -> assertThat(update.timeToLiveSpecification())
+                .isEqualTo(disabled));
     }
 
     @Test
@@ -224,6 +371,7 @@ class DynamoMigrationRunnerTest {
         when(dynamoDb.createTable(any(CreateTableRequest.class))).thenReturn(alreadyExists());
         tablesAreActive();
         history();
+        timeToLive(TimeToLiveStatus.ENABLED, TTL_ATTRIBUTE);
         when(dynamoDb.putItem(any(PutItemRequest.class)))
                 .thenReturn(CompletableFuture.failedFuture(ConditionalCheckFailedException.builder().build()));
         Map<String, String> checksums = new HashMap<>();
@@ -322,6 +470,27 @@ class DynamoMigrationRunnerTest {
 
     private void history() {
         history(List.of());
+    }
+
+    private static boolean recordOf(PutItemRequest put, String migrationId) {
+        return put != null && migrationId.equals(put.item().get("migrationId").s());
+    }
+
+    private void timeToLive(TimeToLiveStatus status, String attribute) {
+        when(dynamoDb.describeTimeToLive(any(DescribeTimeToLiveRequest.class)))
+                .thenReturn(timeToLiveDescribed(status, attribute));
+    }
+
+    private static CompletableFuture<DescribeTimeToLiveResponse> timeToLiveDescribed(TimeToLiveStatus status,
+                                                                         String attribute) {
+        return done(DescribeTimeToLiveResponse.builder().timeToLiveDescription(TimeToLiveDescription.builder()
+                .timeToLiveStatus(status)
+                .attributeName(attribute)
+                .build()));
+    }
+
+    private static DynamoDbException validationError(String message) {
+        return (DynamoDbException) DynamoDbException.builder().statusCode(400).message(message).build();
     }
 
     private void history(List<Map<String, AttributeValue>> records) {

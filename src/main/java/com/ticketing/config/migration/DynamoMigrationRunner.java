@@ -1,13 +1,14 @@
 package com.ticketing.config.migration;
 
 import com.ticketing.config.migration.MigrationChangelogReader.Migration;
-import com.ticketing.config.migration.TableDefinitionParser.TableDefinition;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
@@ -21,6 +22,8 @@ import software.amazon.awssdk.services.dynamodb.model.BillingMode;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.DescribeTableRequest;
+import software.amazon.awssdk.services.dynamodb.model.DescribeTimeToLiveRequest;
+import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.IndexStatus;
 import software.amazon.awssdk.services.dynamodb.model.KeySchemaElement;
@@ -33,7 +36,9 @@ import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanResponse;
 import software.amazon.awssdk.services.dynamodb.model.TableDescription;
 import software.amazon.awssdk.services.dynamodb.model.TableStatus;
+import software.amazon.awssdk.services.dynamodb.model.TimeToLiveDescription;
 import software.amazon.awssdk.services.dynamodb.model.TimeToLiveSpecification;
+import software.amazon.awssdk.services.dynamodb.model.TimeToLiveStatus;
 import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveRequest;
 
 /**
@@ -47,9 +52,10 @@ import software.amazon.awssdk.services.dynamodb.model.UpdateTimeToLiveRequest;
  *     <li>read the applied migrations and fail fast if the checksum of any of them differs from its file (an
  *     applied migration must never be edited: add a new one);</li>
  *     <li>for every pending migration, in changelog order: create the table (an existing table is skipped), wait
- *     until the table and its indexes are {@code ACTIVE}, enable the time to live when the file declares one, and
- *     record the migration with its checksum (a conditional put: a concurrent runner that recorded it first must
- *     have recorded the same checksum).</li>
+ *     until the table and its indexes are {@code ACTIVE}, converge the time to live to the one the file declares
+ *     (whether this run created the table or not, see {@code ensureTimeToLive}), and only then record the
+ *     migration with its checksum (a conditional put: a concurrent runner that recorded it first must have
+ *     recorded the same checksum).</li>
  * </ol>
  * The algorithm is reactive ({@link #migrate()}); {@link #afterSingletonsInstantiated()} blocks on it once, before
  * the HTTP server and the queue listeners start, which is the only blocking call allowed in the application
@@ -62,6 +68,10 @@ public class DynamoMigrationRunner implements SmartInitializingSingleton {
     static final String APPLIED_AT = "appliedAt";
 
     private static final Logger log = LoggerFactory.getLogger(DynamoMigrationRunner.class);
+
+    /** Time-to-live statuses meaning "enabled" (an enabling TTL needs no further request). */
+    private static final Set<TimeToLiveStatus> ACTIVE_TIME_TO_LIVE =
+            EnumSet.of(TimeToLiveStatus.ENABLED, TimeToLiveStatus.ENABLING);
 
     private final DynamoDbAsyncClient dynamoDb;
     private final MigrationChangelogReader changelogReader;
@@ -184,26 +194,26 @@ public class DynamoMigrationRunner implements SmartInitializingSingleton {
 
     private Mono<String> apply(Migration migration) {
         return Mono.fromCallable(() -> tableDefinitionParser.parse(migration.definition()))
-                .flatMap(definition -> createTable(definition.createTable())
-                        .flatMap(created -> waitUntilActive(definition.createTable().tableName())
-                                .then(created ? enableTimeToLive(definition) : Mono.empty())))
+                .flatMap(definition -> {
+                    String tableName = definition.createTable().tableName();
+                    return createTable(definition.createTable())
+                            .then(waitUntilActive(tableName))
+                            .then(ensureTimeToLive(tableName, definition.timeToLive()));
+                })
                 .then(record(migration))
                 .thenReturn(migration.id())
                 .doOnNext(id -> log.info("Applied DynamoDB migration {} ({})", id, migration.file()));
     }
 
     /**
-     * Creates a table.
-     *
-     * @return {@code true} when created, {@code false} when it already existed (or is being created by another
-     *         runner)
+     * Creates a table; a table that already exists (or is being created by another runner) is skipped.
      */
-    private Mono<Boolean> createTable(CreateTableRequest request) {
+    private Mono<Void> createTable(CreateTableRequest request) {
         return Mono.fromFuture(() -> dynamoDb.createTable(request))
-                .thenReturn(true)
+                .then()
                 .onErrorResume(ResourceInUseException.class, exists -> {
                     log.info("DynamoDB table {} already exists, creation skipped", request.tableName());
-                    return Mono.just(false);
+                    return Mono.empty();
                 });
     }
 
@@ -226,16 +236,72 @@ public class DynamoMigrationRunner implements SmartInitializingSingleton {
                 && table.globalSecondaryIndexes().stream().allMatch(index -> index.indexStatus() == IndexStatus.ACTIVE);
     }
 
-    private Mono<Void> enableTimeToLive(TableDefinition definition) {
-        TimeToLiveSpecification timeToLive = definition.timeToLive();
-        if (timeToLive == null) {
+    /**
+     * Converges the time to live of a table to the declared specification. It does not depend on who created the
+     * table: a previous run may have crashed between {@code CreateTable} and {@code UpdateTimeToLive}, or the table
+     * may already exist, and the migration must still not be recorded before its time to live is in place.
+     * {@code DescribeTimeToLive} decides: nothing to do when it already matches ({@code ENABLING} counts as enabled),
+     * {@code UpdateTimeToLive} when it does not, and a fail-fast error when another attribute is enabled (DynamoDB
+     * allows one TTL attribute per table, so the declared one could never be applied). When the update fails because
+     * a concurrent runner changed it first, the status is read again and accepted if it now matches.
+     *
+     * @param tableName physical table name
+     * @param wanted    declared specification, {@code null} when the file declares none
+     * @return completion, or an error signal
+     */
+    private Mono<Void> ensureTimeToLive(String tableName, TimeToLiveSpecification wanted) {
+        if (wanted == null) {
             return Mono.empty();
         }
-        return Mono.fromFuture(() -> dynamoDb.updateTimeToLive(UpdateTimeToLiveRequest.builder()
-                        .tableName(definition.createTable().tableName())
-                        .timeToLiveSpecification(timeToLive)
+        return describeTimeToLive(tableName).flatMap(current -> switch (stateOf(current, wanted)) {
+            case CONVERGED -> Mono.<Void>empty();
+            case CONFLICT -> Mono.<Void>error(timeToLiveConflict(tableName, current, wanted));
+            case PENDING -> updateTimeToLive(tableName, wanted)
+                    .onErrorResume(DynamoDbException.class, failure -> describeTimeToLive(tableName)
+                            .flatMap(after -> stateOf(after, wanted) == TimeToLiveState.CONVERGED
+                                    ? Mono.<Void>empty()
+                                    : Mono.<Void>error(failure)));
+        });
+    }
+
+    private Mono<TimeToLiveDescription> describeTimeToLive(String tableName) {
+        return Mono.fromFuture(() -> dynamoDb.describeTimeToLive(DescribeTimeToLiveRequest.builder()
+                        .tableName(tableName)
                         .build()))
+                .map(response -> Optional.ofNullable(response.timeToLiveDescription())
+                        .orElseGet(() -> TimeToLiveDescription.builder()
+                                .timeToLiveStatus(TimeToLiveStatus.DISABLED)
+                                .build()));
+    }
+
+    private Mono<Void> updateTimeToLive(String tableName, TimeToLiveSpecification wanted) {
+        return Mono.fromFuture(() -> dynamoDb.updateTimeToLive(UpdateTimeToLiveRequest.builder()
+                        .tableName(tableName)
+                        .timeToLiveSpecification(wanted)
+                        .build()))
+                .doOnNext(updated -> log.info("Time to live of DynamoDB table {} set to {} on {}", tableName,
+                        Boolean.TRUE.equals(wanted.enabled()) ? "enabled" : "disabled", wanted.attributeName()))
                 .then();
+    }
+
+    private static TimeToLiveState stateOf(TimeToLiveDescription current, TimeToLiveSpecification wanted) {
+        boolean active = ACTIVE_TIME_TO_LIVE.contains(current.timeToLiveStatus());
+        if (!Boolean.TRUE.equals(wanted.enabled())) {
+            return active ? TimeToLiveState.PENDING : TimeToLiveState.CONVERGED;
+        }
+        if (!active) {
+            return TimeToLiveState.PENDING;
+        }
+        return wanted.attributeName().equals(current.attributeName())
+                ? TimeToLiveState.CONVERGED
+                : TimeToLiveState.CONFLICT;
+    }
+
+    private static IllegalStateException timeToLiveConflict(String tableName, TimeToLiveDescription current,
+                                                            TimeToLiveSpecification wanted) {
+        return new IllegalStateException("DynamoDB table " + tableName + " has its time to live enabled on attribute "
+                + current.attributeName() + " but the migration declares " + wanted.attributeName()
+                + "; only one TTL attribute is allowed per table, fix the table or add a new migration.");
     }
 
     private Mono<Void> record(Migration migration) {
@@ -272,6 +338,16 @@ public class DynamoMigrationRunner implements SmartInitializingSingleton {
         return new IllegalStateException("Checksum mismatch for applied DynamoDB migration " + migration.id()
                 + " (" + migration.file() + "): recorded " + recorded + " but the file hashes to "
                 + migration.checksum() + ". Applied migrations must never change; add a new migration instead.");
+    }
+
+    /** Outcome of comparing the current time to live of a table with the declared one. */
+    private enum TimeToLiveState {
+        /** Already as declared. */
+        CONVERGED,
+        /** Needs an {@code UpdateTimeToLive}. */
+        PENDING,
+        /** Enabled on another attribute: cannot be converged automatically. */
+        CONFLICT
     }
 
     /** Signals that a table (or one of its indexes) is still being created; retried by the status polling. */

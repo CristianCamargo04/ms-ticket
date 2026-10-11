@@ -69,14 +69,23 @@ public class EventPersistenceImpl implements EventPersistence {
         this.mapper = mapper;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The returned event is the stored item read back through the mapper, so its instants have the storage
+     * precision (epoch milliseconds) and it equals a later {@link #findById(String)}.
+     */
     @Override
     public Mono<EventData> create(EventData event) {
-        return Mono.fromFuture(() -> dynamoDb.putItem(PutItemRequest.builder()
-                        .tableName(tableName)
-                        .item(mapper.toItem(event))
-                        .conditionExpression("attribute_not_exists(eventId)")
-                        .build()))
-                .thenReturn(event);
+        return Mono.defer(() -> {
+            Map<String, AttributeValue> item = mapper.toItem(event);
+            return Mono.fromFuture(() -> dynamoDb.putItem(PutItemRequest.builder()
+                            .tableName(tableName)
+                            .item(item)
+                            .conditionExpression("attribute_not_exists(eventId)")
+                            .build()))
+                    .then(Mono.fromCallable(() -> mapper.fromItem(item)));
+        });
     }
 
     @Override

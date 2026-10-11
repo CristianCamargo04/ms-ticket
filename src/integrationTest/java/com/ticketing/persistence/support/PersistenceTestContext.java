@@ -77,8 +77,10 @@ public record PersistenceTestContext(DynamoDbAsyncClient client, DynamoDbTableNa
     }
 
     /**
-     * The current instant truncated to milliseconds (the storage precision), so that persisted and in-memory values
-     * compare equal.
+     * The current instant truncated to milliseconds (the storage precision), so that the expected values a test
+     * derives from it ({@code now.plus(HOLD)}, ...) compare equal to the stored ones. The adapters do not rely on it:
+     * they return values with the storage precision themselves (see
+     * {@code InventoryTransactionPersistenceImplIT.shouldReturnTheStoredStateForSubMillisecondCommandInstants}).
      *
      * @return now
      */

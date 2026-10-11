@@ -17,6 +17,8 @@ import com.ticketing.domain.exception.DomainValidationException;
 import com.ticketing.enums.EventStatusEnum;
 import com.ticketing.persistence.impl.mapper.EventEntityMapper;
 import com.ticketing.persistence.impl.support.CursorCodec;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,6 +61,24 @@ class EventPersistenceImplTest {
     void setUp() {
         persistence = new EventPersistenceImpl(dynamoDb,
                 DynamoDbEnhancedAsyncClient.builder().dynamoDbClient(dynamoDb).build(), TABLES, mapper);
+    }
+
+    @Test
+    void shouldReturnTheCreatedEventWithTheStoragePrecision() {
+        when(dynamoDb.putItem(any(PutItemRequest.class))).thenReturn(completed(PutItemResponse.builder().build()));
+        Instant precise = Instant.parse("2026-10-10T12:00:00.123456789Z");
+        Instant stored = Instant.parse("2026-10-10T12:00:00.123Z");
+        EventData event = EventData.newPublishing(EVENT_ID, "Concert", "Arena", precise.plusSeconds(86_400), 10,
+                new BigDecimal("49.90"), "USD", precise);
+
+        StepVerifier.create(persistence.create(event))
+                .assertNext(created -> {
+                    assertThat(created).isEqualTo(mapper.fromItem(mapper.toItem(event)));
+                    assertThat(created.createdAt()).isEqualTo(stored);
+                    assertThat(created.updatedAt()).isEqualTo(stored);
+                    assertThat(created.eventDate()).isEqualTo(stored.plusSeconds(86_400));
+                })
+                .verifyComplete();
     }
 
     @Test

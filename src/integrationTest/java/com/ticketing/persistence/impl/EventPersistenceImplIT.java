@@ -8,9 +8,11 @@ import com.ticketing.domain.exception.DomainValidationException;
 import com.ticketing.enums.EventStatusEnum;
 import com.ticketing.persistence.support.PersistenceTestContext;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeAll;
@@ -110,6 +112,13 @@ class EventPersistenceImplIT {
         StepVerifier.create(context.events().findByStatus(EventStatusEnum.ON_SALE, 1, publishingCursor))
                 .expectError(DomainValidationException.class)
                 .verify(TIMEOUT);
+        for (String number : List.of("1e999999999", "1e60", "1.5")) {
+            String tampered = Base64.getUrlEncoder().withoutPadding().encodeToString(("eventDate=N:" + number
+                    + "&eventId=S:" + event.eventId() + "&status=S:PUBLISHING").getBytes(StandardCharsets.UTF_8));
+            StepVerifier.create(context.events().findByStatus(EventStatusEnum.PUBLISHING, 1, tampered))
+                    .expectError(DomainValidationException.class)
+                    .verify(TIMEOUT);
+        }
     }
 
     private static EventData newEvent(Instant eventDate) {

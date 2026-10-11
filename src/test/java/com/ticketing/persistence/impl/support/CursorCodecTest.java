@@ -59,10 +59,34 @@ class CursorCodecTest {
     }
 
     @Test
-    void shouldNormalizeNumbers() {
-        String cursor = encodeRaw("eventDate=N:1.50E2&eventId=S:a&status=S:ON_SALE");
+    void shouldNormalizeIntegralNumbers() {
+        String cursor = encodeRaw("eventDate=N:000150&eventId=S:a&status=S:ON_SALE");
 
         assertThat(CursorCodec.decode(cursor, KEY_SCHEMA).get("eventDate")).isEqualTo(AttributeValue.fromN("150"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"-9223372036854775808", "9223372036854775807", "0", "-1"})
+    void shouldAcceptEveryLongNumber(String number) {
+        String cursor = encodeRaw("eventDate=N:" + number + "&eventId=S:a&status=S:ON_SALE");
+
+        assertThat(CursorCodec.decode(cursor, KEY_SCHEMA).get("eventDate")).isEqualTo(AttributeValue.fromN(number));
+    }
+
+    /**
+     * Numbers are never expanded: {@code 1e999999999} would otherwise become a billion-character string
+     * ({@code OutOfMemoryError}), and values DynamoDB cannot hold (more than 38 digits, fractions) would fail there
+     * as a server error instead of a validation error.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"1e999999999", "1E999999999", "1e60", "1.5", "1.50E2", "150.0", "+150", " 150", "",
+            "-", "9223372036854775808", "-9223372036854775809", "12345678901234567890", "%EF%BC%91"})
+    void shouldRejectNumbersThatAreNotPlainLongs(String number) {
+        String cursor = encodeRaw("eventDate=N:" + number + "&eventId=S:a&status=S:ON_SALE");
+
+        assertThatThrownBy(() -> CursorCodec.decode(cursor, KEY_SCHEMA))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessage("Malformed pagination cursor");
     }
 
     @ParameterizedTest
